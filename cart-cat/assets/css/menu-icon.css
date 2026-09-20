@@ -1,0 +1,12 @@
+#adminmenu .toplevel_page_cart-cat div.wp-menu-image::before {
+	background-color: currentColor;
+	content: "";
+	display: block;
+	height: 20px;
+	margin: 7px auto 0;
+	padding: 0;
+	width: 20px;
+	-webkit-mask: url("../icon.svg") center / contain no-repeat;
+	mask: url("../icon.svg") center / contain no-repeat;
+}
+#adminmenu .toplevel_page_cart-cat div.wp-menu-image img { display: none; }

@@ -1,0 +1,2 @@
+# Unified-diff context whitespace is part of the compatibility patch format.
+compat/*.patch -whitespace

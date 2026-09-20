@@ -1,0 +1,69 @@
+.cart-cat-order-pay { --cc-pay-gold: var(--wp--preset--color--primary, #b29659); --cc-pay-border: rgba(178,150,89,.32); }
+/* Woo's block-theme stylesheet caps this wrapper without centering it in its wide block. */
+.cart-cat-order-pay [data-block-name="woocommerce/checkout"].woocommerce { width: 100%; max-width: 1180px; margin-left: auto; margin-right: auto; }
+.cart-cat-order-pay .cc-customer-pay { width: 100%; max-width: 1180px; margin: 0 auto 64px; color: var(--wp--preset--color--foreground, #000); font-family: var(--wp--preset--font-family--lora, "Lora", Georgia, serif); font-size: 16px; line-height: 1.55; }
+.cc-customer-pay *, .cc-customer-pay *::before, .cc-customer-pay *::after { box-sizing: border-box; }
+.cc-customer-pay .cc-pay-intro { margin: 0 0 30px; text-align: center; }
+.cc-customer-pay .cc-pay-intro p { margin: 6px 0; }
+.cc-customer-pay .cc-pay-eyebrow { font-size: 13px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: #66583e; }
+.cc-customer-pay .cc-pay-layout { display: grid; grid-template-columns: minmax(0,1fr) minmax(340px,.68fr); gap: 30px; align-items: start; }
+.cc-customer-pay .cc-pay-details { min-width: 0; }
+.cc-customer-pay .cc-pay-card { min-width: 0; padding: 28px; background: #fff; border: 1px solid var(--cc-pay-border); border-radius: 4px; }
+.cc-customer-pay .cc-pay-card h2 { margin: 0 0 24px; font: 500 25px/1.25 var(--wp--preset--font-family--lora, "Lora", Georgia, serif); text-transform: none; letter-spacing: normal; }
+.cc-customer-pay .cc-pay-products { list-style: none; padding: 0; margin: 0; }
+.cc-customer-pay .cc-pay-product { display: grid; grid-template-columns: 76px minmax(0,1fr) auto; gap: 18px; padding: 22px 0; border-top: 1px solid #e8e5dd; align-items: start; }
+.cc-customer-pay .cc-pay-product:first-child { border-top: 0; padding-top: 0; }
+.cc-customer-pay .cc-pay-product:last-child { padding-bottom: 0; }
+.cc-customer-pay .cc-pay-product-image { background: #fff; border-radius: 3px; overflow: hidden; }
+.cc-customer-pay .cc-pay-product-image img { display: block; width: 76px; height: 100px; object-fit: contain; margin: 0; }
+.cc-customer-pay .cc-pay-product-info h3 { font-weight: 600; font-family: inherit; font-size: 16px; line-height: 1.45; margin: 0 0 8px; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+.cc-customer-pay .cc-pay-product-info .wc-item-meta { font-size: 13px; color: #655f56; padding: 0; list-style: none; margin: 0 0 8px; }
+.cc-customer-pay .wc-item-meta li, .cc-customer-pay .wc-item-meta p { margin: 0; }
+.cc-customer-pay .cc-pay-quantity { font-size: 13px; color: #655f56; margin: 0; }
+.cc-customer-pay .cc-pay-line-price { font-size: 16px; font-weight: 600; white-space: nowrap; text-align: right; }
+.cc-customer-pay .cc-pay-original-price { display: block; color: #655f56; font-size: 13px; font-weight: 400; }
+.cc-customer-pay .cc-pay-current-price { display: block; }
+.cc-customer-pay .cc-pay-line-price.has-discount .cc-pay-current-price, .cc-customer-pay .cc-pay-discount { color: #257344; }
+.cc-customer-pay .cc-pay-fulfillment { margin-top: 24px; }
+.cc-customer-pay .cc-pay-location { font-weight: 600; margin: 0 0 8px; }
+.cc-customer-pay address { font-style: normal; line-height: 1.7; margin: 0; }
+.cc-customer-pay .cc-pay-note, .cc-customer-pay .cc-pay-contact { color: #655f56; font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+.cc-customer-pay .cc-pay-note { margin: 14px 0 0; }
+.cc-customer-pay .cc-pay-contact { margin: 20px 0 0; }
+.cc-customer-pay .cc-pay-totals { margin: 0; }
+.cc-customer-pay .cc-pay-totals > div { display: flex; justify-content: space-between; gap: 24px; margin: 0 0 14px; align-items: baseline; }
+.cc-customer-pay .cc-pay-totals dt { font-weight: 400; min-width: 0; }
+.cc-customer-pay .cc-pay-totals dd { text-align: right; margin: 0; }
+.cc-customer-pay .cc-pay-totals small { display: block; font-size: 12px; }
+.cc-customer-pay .cc-pay-grand-total { padding: 18px 0 0; border-top: 1px solid var(--cc-pay-border); font-size: 21px; }
+.cc-customer-pay .cc-pay-grand-total dt, .cc-customer-pay .cc-pay-grand-total dd { font-weight: 600; }
+.cart-cat-order-pay.woocommerce #payment.cc-pay-payment, .cart-cat-order-pay #payment.cc-pay-payment { padding: 24px 0 0; margin: 24px 0 0; border-top: 1px solid var(--cc-pay-border); background: transparent; border-radius: 0; }
+.cc-customer-pay .cc-pay-payment h2 { margin-bottom: 18px; }
+.cc-customer-pay .cart-cat-payment p { margin: 10px 0 18px; color: #655f56; font-size: 13px; line-height: 1.5; }
+.cc-customer-pay .cc-pay-wallets { margin: 0 0 20px; }
+.cc-customer-pay .cc-pay-wallet-buttons { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,160px),1fr)); gap: 10px; align-items: stretch; }
+.cc-customer-pay .cc-pay-wallet-buttons > * { min-width: 0; }
+.cc-customer-pay .cc-pay-wallets[hidden], .cc-customer-pay .cc-pay-wallet-buttons > [hidden] { display: none !important; }
+.cc-customer-pay .cc-apple-pay { appearance: -apple-pay-button; -webkit-appearance: -apple-pay-button; -apple-pay-button-type: pay; -apple-pay-button-style: black; display: block; width: 100%; height: 44px; min-height: 40px; border: 0; padding: 0; cursor: pointer; }
+.cc-customer-pay .cc-pay-wallet-buttons > :disabled, .cc-customer-pay .cc-pay-wallet-buttons > [aria-disabled="true"] { opacity: .55; cursor: default; pointer-events: none; }
+.cc-customer-pay .cc-pay-card-divider { display: flex; gap: 12px; align-items: center; margin: 18px 0; color: #655f56; font-size: 13px; text-align: center; }
+.cc-customer-pay .cc-pay-card-divider::before, .cc-customer-pay .cc-pay-card-divider::after { content: ""; flex: 1; height: 1px; background: #e8e5dd; }
+.cart-cat-order-pay .cc-customer-pay #payment div.form-row { padding: 0; margin: 0; }
+.cc-customer-pay .woocommerce-terms-and-conditions-wrapper { font-size: 13px; line-height: 1.55; }
+.cc-customer-pay .woocommerce-terms-and-conditions-wrapper p { margin: 12px 0; }
+.cart-cat-order-pay .cc-customer-pay #place_order { width: 100%; display: block; float: none; margin: 20px 0 0; padding: 15px 20px; border: 1px solid var(--cc-pay-gold); border-radius: 2px; background: var(--cc-pay-gold); color: #fff; font-family: inherit; font-size: 15px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; line-height: 1.4; cursor: pointer; }
+.cart-cat-order-pay .cc-customer-pay #place_order:hover:not(:disabled) { background: transparent; color: var(--cc-pay-gold); }
+.cart-cat-order-pay .cc-customer-pay #place_order:disabled { opacity: .55; cursor: default; }
+.cc-customer-pay a { color: #76612f; text-underline-offset: 3px; }
+.cc-customer-pay :focus-visible { outline: 2px solid var(--cc-pay-gold); outline-offset: 4px; }
+@media (max-width: 860px) { .cc-customer-pay .cc-pay-layout { grid-template-columns: 1fr; gap: 24px; } }
+@media (max-width: 480px) {
+	.cart-cat-order-pay .cc-customer-pay { font-size: 15px; }
+	.cc-customer-pay .cc-pay-card { padding: 20px; }
+	.cc-customer-pay .cc-pay-card h2 { font-size: 22px; margin-bottom: 20px; }
+	.cc-customer-pay .cc-pay-product { grid-template-columns: 60px minmax(0,1fr); gap: 12px; }
+	.cc-customer-pay .cc-pay-product-image { grid-row: span 2; }
+	.cc-customer-pay .cc-pay-product-image img { width: 60px; height: 84px; }
+	.cc-customer-pay .cc-pay-line-price { grid-column: 2; text-align: left; }
+	.cc-customer-pay .cc-pay-totals > div { gap: 16px; }
+}

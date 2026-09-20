@@ -1,0 +1,44 @@
+/* Font Awesome Pro 7.2.0, Copyright 2026 Fonticons, Inc. Commercial license.
+ * Existing licensed Book It Beagle assets; see ../fonts/README.txt. Scoped to Cart Cat. */
+@font-face { font-family: "Cart Cat UI Icons"; font-style: normal; font-weight: 900; font-display: block; src: url("../fonts/fa-duotone-900.woff2") format("woff2"); }
+@font-face { font-family: "Cart Cat Provider Icons"; font-style: normal; font-weight: 400; font-display: block; src: url("../fonts/custom-icons.woff2") format("woff2"); }
+.cc-app .cc-icon { display: inline-block; position: relative; width: 1.25em; text-align: center; font: 900 16px/1 "Cart Cat UI Icons"; font-style: normal; font-variant: normal; font-synthesis: none; font-feature-settings: normal; letter-spacing: normal; -webkit-font-smoothing: antialiased; }
+.cc-app .cc-icon::before { content: var(--cc-icon); position: absolute; inset: 0; }
+.cc-app .cc-icon::after { content: var(--cc-icon); font-feature-settings: "ss01"; opacity: .4; }
+.cc-app .cc-icon-user { --cc-icon: "\f007"; }
+.cc-app .cc-icon-signature { --cc-icon: "\f5b7"; }
+.cc-app .cc-icon-envelope { --cc-icon: "\f0e0"; }
+.cc-app .cc-icon-phone { --cc-icon: "\f095"; }
+.cc-app .cc-icon-search { --cc-icon: "\f002"; }
+.cc-app .cc-icon-wine { --cc-icon: "\f72f"; }
+.cc-app .cc-icon-location { --cc-icon: "\f3c5"; }
+.cc-app .cc-icon-building { --cc-icon: "\f1ad"; }
+.cc-app .cc-icon-map { --cc-icon: "\f5a0"; }
+.cc-app .cc-icon-globe { --cc-icon: "\f0ac"; }
+.cc-app .cc-icon-city { --cc-icon: "\f64f"; }
+.cc-app .cc-icon-pin { --cc-icon: "\f276"; }
+.cc-app .cc-icon-tag { --cc-icon: "\f02b"; }
+.cc-app .cc-icon-notes { --cc-icon: "\f249"; }
+.cc-app .cc-icon-options { --cc-icon: "\f1de"; }
+.cc-app .cc-icon-address { --cc-icon: "\f2bb"; }
+.cc-app .cc-icon-user-plus { --cc-icon: "\f234"; }
+.cc-app .cc-icon-store { --cc-icon: "\f54e"; }
+.cc-app .cc-icon-truck { --cc-icon: "\f0d1"; }
+.cc-app .cc-icon-provider { width: auto; font-family: "Cart Cat Provider Icons"; font-weight: 400; }
+.cc-app .cc-icon-provider::before { position: static; }
+.cc-app .cc-icon-provider::after { content: none; }
+.cc-app .cc-icon-woocommerce { --cc-icon: "\e097"; color: #674399; }
+.cc-app .cc-icon-square { --cc-icon: "\e095"; color: #252a2e; }
+.cc-app .cc-input-wrap { display: block; position: relative; width: 100%; min-width: 0; }
+.cc-app .cc-input-wrap > input, .cc-app .cc-input-wrap > select, .cc-app .cc-input-wrap > textarea { padding-left: 38px; width: 100%; margin: 0; }
+.cc-app .cc-field-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); line-height: 1; color: #68717a; pointer-events: none; z-index: 1; }
+.cc-app .cc-textarea-wrap > .cc-field-icon { top: 12px; transform: none; }
+.cc-app .cc-search-wrap { margin-top: 7px; }
+.cc-app .cc-search-wrap > input { min-height: 42px; }
+.cc-app .cc-badge .cc-icon { font-size: 12px; vertical-align: -1px; margin-right: 5px; }
+.cc-app .cc-badge[role="img"] { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 7px; }
+.cc-app .cc-badge[role="img"] .cc-icon { font-size: 15px; margin: 0; }
+.cc-app .cc-badge[role="img"] .cc-icon-woocommerce { font-size: 12px; }
+.cc-app .cc-choice strong .cc-icon { margin-right: 8px; color: #68717a; vertical-align: -1px; }
+.cc-app .cc-choice:has(input:checked) strong .cc-icon { color: #2271b1; }
+.cc-app .cc-disclosure-button .cc-icon, .cc-app #cc-new-customer .cc-icon { font-size: 14px; vertical-align: -1px; margin-right: 7px; }

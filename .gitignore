@@ -1,0 +1,23 @@
+# Local operating-system, editor and runtime files.
+.DS_Store
+._*
+__pycache__/
+*.py[cod]
+node_modules/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Generated packages and private deployment/test evidence stay local.
+/dist/
+/releases/
+/VALIDATION.md
+/docs/test-results/
+/docs/*.png
+
+# Commercially licensed icon assets must be provisioned separately.
+/cat-space-duotone-regular-full.svg
+/cart-cat/assets/icon.svg
+/cart-cat/assets/fonts/*.woff2

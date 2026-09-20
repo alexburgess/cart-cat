@@ -1,0 +1,19 @@
+--- a/includes/class-quantity-crab-discounts.php
++++ b/includes/class-quantity-crab-discounts.php
+@@ -10,6 +10,7 @@
+ }
+ 
+ final class Quantity_Crab_Discounts {
++	const CUSTOMER_CONTEXT_VERSION = 1;
+ 	const CART_MARKER = '_quantity_crab_discount';
+ 	const RESTORE_PRIORITY = 1;
+ 	const APPLY_PRIORITY = 1100;
+@@ -102,7 +103,7 @@
+ 			$rules = array_map( array( 'Quantity_Crab_Rules', 'normalize_rule' ), $rules );
+ 			$rule_quantities = $this->get_rule_quantities( $cart, $rules );
+ 			$roles           = $this->get_effective_roles( $cart );
+-			$is_guest        = ! is_user_logged_in();
++			$is_guest        = (bool) apply_filters( 'quantity_crab_customer_is_guest', ! is_user_logged_in(), $cart );
+ 			$cart_hash       = spl_object_hash( $cart );
+ 
+ 			foreach ( (array) $cart->get_cart() as $cart_item_key => $cart_item ) {

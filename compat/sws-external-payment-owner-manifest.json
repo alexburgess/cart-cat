@@ -1,0 +1,34 @@
+{
+  "squarewoosync-pro.php": {
+    "before": "87df5083c68c9519233766c865e65964134bde992aa01daf0214d676ec0c01ad",
+    "after": "1b798f3a2f65c8dce623fd07a99dbd26cf42c78c4f944059d2eac070c5c0d1e8"
+  },
+  "includes/Woo/SyncOrder.php": {
+    "before": "9cbb1ea86085e899898f22968f3632e946dc809bfc5a8fcaea7c90ae22c5674f",
+    "after": "2a7c98fce19c2322c843d6d9315454d05dd5efd2ef74463d4719c7643c68d007"
+  },
+  "includes/Jobs/OrderSyncJob.php": {
+    "before": "bc717ec4409a66453d5329aa64b5e3e1dad876cb1971c32cad5c794314e30e62",
+    "after": "01e244ec67bce8c6fab98d27c8a6f00e769996d810a52826b440aabd70ed6093"
+  },
+  "includes/Payments/PaymentCaptureManager.php": {
+    "before": "d79dcfe9d15df6c366cdd363e5996b2626e3d800420a45919fad65e16ea7cbb9",
+    "after": "c1ddbdb84999e7e06cd16ef7accc305915f30bcb62dcfc7896c5eb08f0896a5b"
+  },
+  "includes/Payments/WC_SquareSync_Gateway.php": {
+    "before": "9cc0dc05e287a225bbd7abb9c6d5955f02d0d335e3f593745306486c85623dd4",
+    "after": "6b411b549ae28cbf8ecc19e7ef6582c06beee8667f49790f81a650a7cbe2c306"
+  },
+  "includes/Orders/WooOrder.php": {
+    "before": "e93be31e2aa1329e095dd33a5766daf6e9343eb4da34373f617384db04c1ccb5",
+    "after": "9690dcbf8a45ecf4d547cbfe08765914ba1b29c38e1cef166269910668c8a5c1"
+  },
+  "includes/Woo/CreateOrder.php": {
+    "before": "979e476bf27c6752e9860ef810697614a7f5b5439e5f8cdb44d1a8a9257eccbb",
+    "after": "a169ad873635d61817942964bf936c78379848712166ad071dc5fa0bd53344fd"
+  },
+  "includes/Jobs/WebhookProcessJob.php": {
+    "before": "a798fa94f175d1f09bd1d530bfc44a252c98456dc02a10e2015f477923d8f569",
+    "after": "328f24f96787a9cc910e6e04bfddeab1d87f44727c3ad4d104c038161e95f641"
+  }
+}
