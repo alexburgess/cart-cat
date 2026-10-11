@@ -82,6 +82,18 @@ try {
 	$normalized_note = "Internal note " . $suffix . "\nKeep this private.";
 	$quote = $ok( Quote::calculate( $input ) );
 	$assert( $quote['can_submit'], 'Lifecycle fixture has a submittable pickup quote.' );
+	$assert( 'regular' === $quote['order_type'], 'Unmarked orders default to regular.' );
+	foreach ( array( 'club', '', null, false, array() ) as $invalid_type ) {
+		$bad_type = $input; $bad_type['order_type'] = $invalid_type;
+		$assert( $is_error( Quote::calculate( $bad_type ), 'cart_cat_order_type' ), 'Invalid types are rejected before preparation.' );
+	}
+	$somminar_input = $input; $somminar_input['order_type'] = 'somminar'; $somminar_quote = $ok( Quote::calculate( $somminar_input ) );
+	$assert( $quote['hash'] !== $somminar_quote['hash'] && $quote['totals'] === $somminar_quote['totals'], 'SOMMinar type changes quote identity without changing prices.' );
+	$assert( $is_error( Orders::create( $somminar_input, $quote['hash'], $track_request() ), 'cart_cat_stale_quote' ), 'A changed order type cannot use a prior approved quote.' );
+	$somminar_order = $prepare( $somminar_input );
+	$assert( 'somminar' === $somminar_order->get_meta( '_pupel_order_type' ) && 'somminar' === $ok( Orders::get( $somminar_order->get_id() ) )['input']['order_type'] && 'pending' === $somminar_order->get_status(), 'SOMMinar pickup persists its type and keeps the normal payment lifecycle.' );
+	$paid_somminar = $somminar_order; $paid_somminar->payment_complete( 'fixture-somminar' );
+	$assert( 'processing' === $paid_somminar->get_status() && 'somminar' === $paid_somminar->get_meta( '_pupel_order_type' ), 'Payment completion sends a physical SOMMinar order to Processing without losing its identity.' );
 	$plain_notes_input = $input; $plain_notes_input['order_notes'] = $normalized_note;
 	$assert( $quote['hash'] === $ok( Quote::calculate( $plain_notes_input ) )['hash'], 'Private notes are normalized before the quote hash, preserving multiline text while stripping markup.' );
 	$changed_notes = $plain_notes_input; $changed_notes['order_notes'] .= "\nAnother private detail."; $changed_notes_quote = $ok( Quote::calculate( $changed_notes ) );
@@ -93,6 +105,7 @@ try {
 	$created = $ok( Orders::create( $input, $quote['hash'], $request ) ); $orders[] = $created['order_id'];
 	$initial = wc_get_order( $created['order_id'] );
 	$assert( 'pending' === $initial->get_status() && 'ready' === $initial->get_meta( '_cart_cat_preparation' ), 'Prepared order is pending and complete.' );
+	$assert( 'regular' === $initial->get_meta( '_pupel_order_type' ) && 'regular' === $created['input']['order_type'], 'Regular orders explicitly retain their type.' );
 	$initial_notes = $staff_notes( $initial->get_id() );
 	$assert( $created['input']['order_notes'] === $normalized_note && $created['order_notes'] === $normalized_note, 'Prepared and reloaded staff input exposes the sanitized note snapshot.' );
 	$assert( 1 === count( $initial_notes ) && "Cart Cat staff note by " . wp_get_current_user()->display_name . ":\n" . $normalized_note === $initial_notes[0]->content, 'Preparation writes exactly one attributed private Woo note.' );
@@ -247,11 +260,13 @@ try {
 	$assert( $is_error( $blocked, 'cart_cat_not_ready' ) && $before_provider === count( $provider_calls ), 'An old customer payment page cannot charge while staff edit.' );
 	$assert( $is_error( Orders::email( $edit_id ), 'cart_cat_not_payable' ), 'Suspended preparation cannot email a payable invoice.' );
 	$edit_input = $editing['input']; $edit_input['lines'][0]['quantity'] = 2; $edit_input['discount']['amount'] = 10; $edit_input['hold_minutes'] = 1440;
+	$edit_input['order_type'] = 'somminar';
 	$edit_quote = $ok( Quote::calculate( $edit_input ) ); $edit_request = 'reprepare-' . wp_generate_uuid4();
 	$assert( $is_error( Orders::prepare( $edit_id, $edit_input, $old_version, $old_version, $edit_request ), 'cart_cat_stale_quote' ), 'Reprepare rejects a stale preview without changing the suspended order.' );
 	$prepared = $ok( Orders::prepare( $edit_id, $edit_input, $edit_quote['hash'], $old_version, $edit_request ) );
 	$edited_order = wc_get_order( $edit_id );
 	$assert( $prepared['order_id'] === $edit_id && $before_count === $new_order_count && 'ready' === $prepared['preparation'], 'Reprepare updates the existing order without another Woo insert.' );
+	$assert( 'somminar' === $edited_order->get_meta( '_pupel_order_type' ) && 'somminar' === $prepared['input']['order_type'], 'Changing type during edit updates the same order and reload input.' );
 	$assert( $old_version !== $prepared['version'] && $old_key !== $edited_order->get_order_key(), 'Every reprepare rotates the payment version and invalidates previously emailed guest links.' );
 	$assert( false === $prepared['payment_email']['accepted'] && '' === $prepared['payment_email']['recipient'] && null === $prepared['payment_email']['accepted_at'] && $prepared['version'] === $prepared['payment_email']['version'], 'A new preparation version does not inherit an earlier accepted payment email.' );
 	$assert( 1 === count( $edited_order->get_items() ) && 2 === $reserved( $edit_id ) && $edited_order->get_total() === $edit_quote['totals']['total'], 'Reprepare replaces lines and stock holds with exactly the new quote.' );
@@ -260,6 +275,7 @@ try {
 	$repeat_prepare = $ok( Orders::prepare( $edit_id, $edit_input, $edit_quote['hash'], $old_version, $edit_request ) );
 	$assert( $repeat_prepare['version'] === $prepared['version'] && $before_count === $new_order_count && 2 === $reserved( $edit_id ), 'Retry of an uncertain reprepare returns the same final version without reapplying it.' );
 	$assert( $repeat_prepare['hold']['expires_at'] === $prepared['hold']['expires_at'], 'Duplicate reprepare does not reset the deadline.' );
+	$assert( 'somminar' === $repeat_prepare['input']['order_type'], 'Reprepare recovery retains the selected order type.' );
 	$assert( 1 === count( $staff_notes( $edit_id ) ), 'Repreparing other fields and retrying it do not repeat an unchanged internal note.' );
 	$assert( $is_error( Payments::pay( $edit_id, array( 'source_type' => 'token', 'token' => 'cnon:lifecycle-fixture-only', 'version' => $old_version ) ), 'cart_cat_order_changed' ), 'A customer form from the previous preparation cannot charge after reprepare.' );
 	Orders::expire( $edit_id );
@@ -273,6 +289,9 @@ try {
 	$editing_order = wc_get_order( $edit_id ); $editing_order->update_meta_data( '_cart_cat_payment_attempt', array( 'state' => 'declined', 'id' => 'fixture-declined', 'square_order_id' => 'fixture-old-square-order' ) ); $editing_order->update_meta_data( 'square_order_id', 'fixture-old-square-order' ); $editing_order->save();
 	$declined_edit = $ok( Orders::edit( $edit_id, $prepared['version'] ) ); $editing_order = wc_get_order( $edit_id );
 	$assert( ! $editing_order->get_meta( '_cart_cat_payment_attempt' ) && ! $editing_order->get_meta( 'square_order_id' ) && 'fixture-declined' === $editing_order->get_meta( '_cart_cat_payment_history' )[0]['id'], 'Editing a definitively declined attempt archives it and clears its active Square identity.' );
+	$regular_again = $declined_edit['input']; $regular_again['order_type'] = 'regular'; $regular_quote = $ok( Quote::calculate( $regular_again ) );
+	$regular_prepared = $ok( Orders::prepare( $edit_id, $regular_again, $regular_quote['hash'], $declined_edit['version'], 'regular-type-' . wp_generate_uuid4() ) );
+	$assert( 'regular' === $regular_prepared['input']['order_type'] && 'regular' === wc_get_order( $edit_id )->get_meta( '_pupel_order_type' ), 'Turning off SOMMinar resets the existing order type without a replacement order.' );
 	$legacy = $prepare( $input ); $legacy->delete_meta_data( '_cart_cat_input' ); $legacy->delete_meta_data( '_cart_cat_review' ); $legacy->save();
 	$legacy_edit = $ok( Orders::edit( $legacy->get_id(), $legacy->get_meta( '_cart_cat_version' ) ) );
 	$assert( (int) $legacy_edit['input']['lines'][0]['product_id'] === $product->get_id() && 'editing' === $legacy_edit['preparation'], 'Legacy simple product orders can safely resume without an old form snapshot.' );

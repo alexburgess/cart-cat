@@ -85,7 +85,7 @@ final class Orders {
 		$order = self::load( $id ); if ( is_wp_error( $order ) ) { return $order; }
 		$input = self::editable_input( $order );
 		$editable = self::editable( $order );
-		return array( 'order_id' => $id, 'number' => $order->get_order_number(), 'status' => $order->get_status(), 'total' => $order->get_total(), 'currency' => $order->get_currency(), 'billing' => $order->get_address( 'billing' ), 'shipping' => self::shipping_address( $order ), 'payment_url' => $order->get_checkout_payment_url(), 'edit_url' => $order->get_edit_order_url(), 'version' => $order->get_meta( '_cart_cat_version' ), 'paid' => $order->is_paid(), 'preparation' => $order->get_meta( '_cart_cat_preparation' ), 'payment_email' => self::payment_email( $order ), 'hold' => Stock_Hold::details( $order ), 'payment_status' => Stock_Hold::payment_status( $order ), 'order_notes' => (string) $order->get_meta( '_cart_cat_order_notes' ), 'order_notes_visible' => 'yes' === $order->get_meta( '_cart_cat_order_notes_visible' ), 'can_edit' => true === $editable && ! is_wp_error( $input ), 'edit_message' => is_wp_error( $editable ) ? $editable->get_error_message() : ( is_wp_error( $input ) ? $input->get_error_message() : '' ), 'input' => is_wp_error( $input ) ? null : $input, 'customer' => self::review( $order )['customer'], 'review' => self::review( $order ) );
+		return array( 'order_id' => $id, 'number' => $order->get_order_number(), 'status' => $order->get_status(), 'total' => $order->get_total(), 'currency' => $order->get_currency(), 'billing' => $order->get_address( 'billing' ), 'shipping' => self::shipping_address( $order ), 'payment_url' => $order->get_checkout_payment_url(), 'edit_url' => $order->get_edit_order_url(), 'version' => $order->get_meta( '_cart_cat_version' ), 'paid' => $order->is_paid(), 'preparation' => $order->get_meta( '_cart_cat_preparation' ), 'payment_email' => self::payment_email( $order ), 'hold' => Stock_Hold::details( $order ), 'payment_status' => Stock_Hold::payment_status( $order ), 'payment' => Payments::result( $order )['payment'] ?? null, 'order_notes' => (string) $order->get_meta( '_cart_cat_order_notes' ), 'order_notes_visible' => 'yes' === $order->get_meta( '_cart_cat_order_notes_visible' ), 'can_edit' => true === $editable && ! is_wp_error( $input ), 'edit_message' => is_wp_error( $editable ) ? $editable->get_error_message() : ( is_wp_error( $input ) ? $input->get_error_message() : '' ), 'input' => is_wp_error( $input ) ? null : $input, 'customer' => self::review( $order )['customer'], 'review' => self::review( $order ) );
 	}
 	/** Suspend payment before exposing editable fields. The native order and its stock hold remain. */
 	public static function edit( int $id, string $version ) {
@@ -291,6 +291,11 @@ final class Orders {
 			$deadline = (int) $order->get_meta( '_cart_cat_expires_at' );
 			if ( $deadline > time() ) { wp_schedule_single_event( $deadline, 'cart_cat_expire_order', array( $id ) ); return; }
 			if ( ! Payments::can_expire( $order ) ) {
+				$attempt = (array) $order->get_meta( '_cart_cat_payment_attempt' );
+				if ( Split_Payments::owns( $attempt ) ) {
+					Split_Payments::cancel( $order, $attempt );
+					if ( Payments::can_expire( $order ) ) { self::expire_locked( $order ); return; }
+				}
 				if ( Stock_Hold::managed( $order ) ) { Payments::refresh_reservation( $order ); }
 				wp_schedule_single_event( time() + 7 * MINUTE_IN_SECONDS, 'cart_cat_expire_order', array( $id ) ); return;
 			}
@@ -319,7 +324,7 @@ final class Orders {
 	private static function save_review( $order, array $quote ) {
 		$review = $quote;
 		foreach ( array_keys( $review ) as $key ) { if ( '_' === substr( $key, 0, 1 ) ) { unset( $review[ $key ] ); } }
-		$input = array_intersect_key( $quote['_input'], array_flip( array( 'customer', 'lines', 'discount', 'fulfillment', 'hold_minutes', 'order_notes', 'order_notes_visible' ) ) );
+		$input = array_intersect_key( $quote['_input'], array_flip( array( 'customer', 'lines', 'discount', 'fulfillment', 'hold_minutes', 'order_notes', 'order_notes_visible', 'order_type' ) ) );
 		$input['customer'] = array_intersect_key( $quote['_customer'], array_flip( array( 'first_name', 'last_name', 'email', 'phone', 'billing', 'shipping' ) ) );
 		$input['lines'] = array_map( static function ( $line ) {
 			$stored = wc_clean( array_intersect_key( $line, array_flip( array( 'product_id', 'variation_id', 'quantity', 'attributes' ) ) ) );
@@ -332,6 +337,7 @@ final class Orders {
 			return $stored;
 		}, $input['lines'] );
 		$order->update_meta_data( '_cart_cat_input', $input );
+		$order->update_meta_data( '_pupel_order_type', $input['order_type'] );
 		$order->update_meta_data( '_cart_cat_order_notes', $input['order_notes'] );
 		$order->update_meta_data( '_cart_cat_order_notes_visible', ! empty( $input['order_notes_visible'] ) ? 'yes' : 'no' );
 		$order->set_customer_note( ! empty( $input['order_notes_visible'] ) ? $input['order_notes'] : '' );
@@ -370,6 +376,7 @@ final class Orders {
 		$input['hold_minutes'] = isset( $input['hold_minutes'] ) ? (int) $input['hold_minutes'] : ( Stock_Hold::managed( $order ) ? Stock_Hold::details( $order )['minutes'] : Stock_Hold::config()['default_minutes'] );
 		$input['order_notes'] = isset( $input['order_notes'] ) ? (string) $input['order_notes'] : (string) $order->get_meta( '_cart_cat_order_notes' );
 		$input['order_notes_visible'] = isset( $input['order_notes_visible'] ) ? (bool) $input['order_notes_visible'] : 'yes' === $order->get_meta( '_cart_cat_order_notes_visible' );
+		$input['order_type'] = 'somminar' === $order->get_meta( '_pupel_order_type' ) ? 'somminar' : 'regular';
 		$reference = Customers::reference_for_order( $order ); if ( is_wp_error( $reference ) ) { return $reference; }
 		$input['customer'] = array( 'reference' => $reference, 'first_name' => $order->get_billing_first_name(), 'last_name' => $order->get_billing_last_name(), 'email' => $order->get_billing_email(), 'phone' => $order->get_billing_phone(), 'billing' => $order->get_address( 'billing' ), 'shipping' => self::shipping_address( $order ) );
 		foreach ( $input['lines'] as &$line ) {

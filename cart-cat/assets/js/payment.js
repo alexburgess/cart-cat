@@ -73,7 +73,8 @@
       if (!element || !options.config || !options.config.ready || !window.isSecureContext) throw new Error('Square requires a ready connection and HTTPS.');
       const Square = await sdk(options.config.environment);
       const payments = Square.payments(options.config.application_id, options.config.location_id);
-      const card = await payments.card();
+      const gift = options.method === 'gift_card';
+      const card = gift ? await payments.giftCard() : await payments.card();
       await card.attach(element);
       let busy = false;
       const wallets = [];
@@ -81,11 +82,11 @@
         async tokenize() {
           if (busy) throw new Error('Payment details are already being secured.');
           busy = true;
-          try { return tokenResult(await card.tokenize(verificationDetails(options))); }
+          try { return tokenResult(await card.tokenize(...(gift ? [] : [verificationDetails(options)]))); }
           finally { busy = false; }
         },
         async wallet(name, target) {
-          if (options.channel !== 'customer' || !['applePay', 'googlePay'].includes(name) || !options.config.wallets?.[name]) throw new Error('Wallet unavailable.');
+          if (gift || options.channel !== 'customer' || !['applePay', 'googlePay'].includes(name) || !options.config.wallets?.[name]) throw new Error('Wallet unavailable.');
           const request = payments.paymentRequest({countryCode: options.config.country || 'US', currencyCode: options.currency, total: {amount: String(options.amount), label: 'Order total'}, requestBillingContact: false, requestShippingContact: false});
           const method = await payments[name](request);
           wallets.push(method);
@@ -115,16 +116,59 @@
     if (!form) return;
     root.dataset.initialized = '1';
     const submit = form.querySelector('[type="submit"]');
+    const options = JSON.parse(root.dataset.options);
+    if (['paid', 'unavailable'].includes(options.status)) { if (submit) { submit.disabled = true; submit.hidden = true; } return; }
+    const amount = value => new Intl.NumberFormat(undefined, {style: 'currency', currency: options.currency}).format(Number(value));
+    const applied = root.querySelector('[data-cart-cat-applied]');
+    if (options.payment && applied) {
+      applied.hidden = false;
+      for (const tender of options.payment.tenders) {
+        const line = document.createElement('p');
+        line.textContent = `${tender.kind === 'gift_card' ? 'Gift card' : 'Card'}${tender.last4 ? ` •••• ${tender.last4}` : ''}: ${amount(tender.amount)} reserved`;
+        applied.append(line);
+      }
+      const remaining = document.createElement('strong');
+      remaining.textContent = `Remaining to pay: ${amount(options.amount)}`;
+      applied.append(remaining);
+      if (options.payment.can_cancel) {
+        const help = document.createElement('p');
+        help.textContent = `Complete this payment by ${new Date(options.payment.expires_at * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}. Unused authorizations will be cancelled.`;
+        applied.append(help);
+      }
+    }
+    const cancel = root.querySelector('[data-cart-cat-cancel]');
+    let controller; let giftController; let submitting = false; let secured = false; let mounting = false;
+    if (cancel && options.payment?.can_cancel) {
+      cancel.hidden = false;
+      cancel.addEventListener('click', () => {
+        if (submitting || secured || mounting) return;
+        submitting = true; secured = true; cancel.disabled = true;
+        root.querySelector('[name="cart_cat_action"]').value = 'cancel';
+        root.querySelector('[name="cart_cat_token"]').value = '';
+        // Cancelling an authorization does not require accepting purchase terms.
+        form.noValidate = true;
+        const termsField = form.querySelector('[name="terms-field"]');
+        if (termsField) termsField.disabled = true;
+        if (submit) submit.disabled = false;
+        form.requestSubmit(submit || undefined);
+        if (submit) submit.disabled = true;
+      });
+    }
     if (root.dataset.checking === '1') { if (submit) submit.disabled = true; return; }
+    if (submit && options.payment) submit.textContent = `Pay ${amount(options.amount)}`;
     const status = root.querySelector('[data-cart-cat-card-status]');
     const walletBox = root.querySelector('[data-cart-cat-wallets]');
     const tokenInput = root.querySelector('[name="cart_cat_token"]');
     const verificationInput = root.querySelector('[name="cart_cat_verification_token"]');
     const terms = form.querySelector('#terms');
     if (terms) terms.addEventListener('change', () => terms.setCustomValidity(''));
-    let controller; let submitting = false; let secured = false;
+    const giftOpen = root.querySelector('[data-cart-cat-gift-open]');
+    const giftApply = root.querySelector('[data-cart-cat-gift-apply]');
     function busy(value) {
       if (submit) submit.disabled = value || !controller;
+      if (giftOpen) giftOpen.disabled = value;
+      if (giftApply) giftApply.disabled = value || !giftController;
+      if (cancel) cancel.disabled = value;
       if (walletBox) {
         walletBox.inert = value;
         walletBox.querySelectorAll('button').forEach(button => { button.disabled = value; });
@@ -136,14 +180,16 @@
       if (terms) terms.setCustomValidity(terms.checked ? '' : 'Please read and accept the terms and conditions.');
       return form.reportValidity();
     }
-    async function pay(method) {
-      if (submitting || secured || !controller || !valid()) return;
+    async function pay(method, sourceType = 'token') {
+      if (submitting || secured || mounting || !method || !valid()) return;
       submitting = true; clearTokens(); busy(true);
       status.textContent = 'Securing payment details…';
       try {
         const result = await method.tokenize();
         if (!valid()) { status.textContent = 'Review the required details, then try again.'; submitting = false; busy(false); return; }
         tokenInput.value = typeof result === 'string' ? result : result.token;
+        root.querySelector('[name="cart_cat_source_type"]').value = sourceType;
+        root.querySelector('[name="cart_cat_request_id"]').value = window.crypto.randomUUID?.() || Array.from(window.crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
         if (verificationInput) verificationInput.value = typeof result === 'string' ? '' : result.verification;
         // Leave the original native submit dispatch before requesting another.
         // An already-resolved SDK promise can otherwise hit HTML's re-entry guard.
@@ -161,12 +207,24 @@
       event.preventDefault(); event.stopImmediatePropagation();
       if (controller) pay(controller);
     }, true);
+    giftOpen?.addEventListener('click', async () => {
+      if (submitting || secured || giftOpen.disabled) return;
+      root.querySelector('[data-cart-cat-gift-form]').hidden = false;
+      if (giftController) return;
+      mounting = true; busy(true);
+      try {
+        giftController = await window.CartCatPayment.mount(root.querySelector('[data-cart-cat-gift]'), {...options, method: 'gift_card'});
+        status.textContent = 'Apply a Square gift card, then pay any remaining amount by card.';
+      } catch (error) { status.textContent = error.message; }
+      finally { mounting = false; busy(false); }
+    });
+    giftApply?.addEventListener('click', () => pay(giftController, 'gift_card'));
     busy(true);
     try {
-      controller = await window.CartCatPayment.mount(root.querySelector('[data-cart-cat-card]'), JSON.parse(root.dataset.options));
+      controller = await window.CartCatPayment.mount(root.querySelector('[data-cart-cat-card]'), options);
       status.textContent = 'Card details are sent securely to Square.';
       busy(false);
-    } catch (error) { status.textContent = error.message; return; }
+    } catch (error) { status.textContent = error.message; busy(false); return; }
     if (!walletBox) return;
     // Wallet availability is optional. One unavailable wallet never prevents card payment.
     await Promise.allSettled(['applePay', 'googlePay'].map(async name => {

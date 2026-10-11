@@ -32,7 +32,7 @@ final class Payments {
         return is_array($square_order) && ($square_order['metadata']['cart_cat_owner'] ?? '') === '1'
             && preg_match('/^cc-\d+-[a-f0-9]{24}$/D', (string) ($square_order['reference_id'] ?? '')) === 1;
     }
-    private static function meta_array($order, string $key): array {
+    public static function meta_array($order, string $key): array {
         $value = $order->get_meta($key, true); return is_array($value) ? $value : array();
     }
     private static function order(int $id) {
@@ -86,22 +86,24 @@ final class Payments {
         $attempt = self::meta_array($order, '_cart_cat_payment_attempt');
         return $order->is_paid() || ($order->has_status('refunded') && ($attempt['state'] ?? '') === 'paid' && $order->get_transaction_id() === ($attempt['payment_id'] ?? ''));
     }
-    private static function result($order, string $status = '', string $message = ''): array {
+    public static function result($order, string $status = '', string $message = ''): array {
         $attempt = self::meta_array($order, '_cart_cat_payment_attempt');
         if ($status === '') {
             $status = self::settled($order) ? 'paid' : (in_array($attempt['state'] ?? '', array('creating_order', 'charging', 'checking', 'review'), true) ? 'checking' : (($attempt['state'] ?? '') === 'declined' ? 'declined' : 'unpaid'));
+            if (Split_Payments::owns($attempt) && !self::settled($order)) { $status = Split_Payments::status_label($attempt); }
         }
         $out = array('order_id' => $order->get_id(), 'status' => $status);
+        if (Split_Payments::owns($attempt)) { $out['payment'] = Split_Payments::summary($attempt); }
         if ($message !== '') { $out['message'] = $message; }
         $receipt = (string) $order->get_meta('_cart_cat_receipt_url', true);
         if ($status === 'paid' && $receipt && preg_match('#^https://(?:squareup\.com|squareupsandbox\.com)/#', $receipt)) { $out['receipt_url'] = $receipt; }
         return $out;
     }
-    private static function save($order, array $attempt): void {
+    public static function save($order, array $attempt): void {
         if (!Payment_Lock::owned((int) $order->get_id())) { throw new \RuntimeException('The payment database lock was lost. Reconcile the existing attempt.'); }
         $order->update_meta_data('_cart_cat_payment_attempt', $attempt); $order->save();
     }
-    private static function schedule(int $id): void {
+    public static function schedule(int $id): void {
         $order = wc_get_order($id);
         $attempt = $order ? self::meta_array($order, '_cart_cat_payment_attempt') : array();
         $delay = min(900, 45 * (2 ** min(5, (int) floor(((int) ($attempt['reconciliations'] ?? 0)) / 4))));
@@ -177,6 +179,12 @@ final class Payments {
             $order = self::order($order_id); if (is_wp_error($order)) { return $order; }
             if (self::settled($order)) { return self::result($order); }
             $attempt = self::meta_array($order, '_cart_cat_payment_attempt');
+            if (Split_Payments::owns($attempt) && ($attempt['state'] ?? '') !== 'declined') { return Split_Payments::pay($order, $attempt, $request, $channel); }
+            if (Split_Payments::seen_request($order, (string) ($request['request_id'] ?? ''))) { return self::result($order); }
+            // A cancelled split resets the amount due. A stale remainder form must never charge the full total.
+            if ((Split_Payments::owns($attempt) || !empty($request['payment_revision'])) && !hash_equals((string) ($attempt['revision'] ?? ''), (string) ($request['payment_revision'] ?? ''))) {
+                return new \WP_Error('cart_cat_payment_changed', 'Payment changed. Reload its current balance before submitting again.', array('status' => 409));
+            }
             // A lease expiring never grants permission to start a fresh charge.
             if ($attempt && !in_array($attempt['state'] ?? '', array('declined'), true)) { return self::reconcile_locked($order, $attempt); }
             $hold = Stock_Hold::validate($order); if (is_wp_error($hold)) { return $hold; }
@@ -198,16 +206,10 @@ final class Payments {
             $context = Square::context(); if (is_wp_error($context)) { return $context; }
             $source_type = $request['source_type'] ?? '';
             $customer = (string) $order->get_meta('_cart_cat_square_customer_id', true);
-            if ($source_type === 'card') {
-                if ($channel !== 'staff') { return new \WP_Error('cart_cat_forbidden', 'Stored cards are available only to staff.'); }
-                $cards = self::raw_cards($order); if (is_wp_error($cards)) { return $cards; }
-                $source = '';
-                foreach ($cards as $card) { if (hash_equals(self::card_reference($order, $card['id']), (string) ($request['card_reference'] ?? ''))) { $source = $card['id']; break; } }
-                if ($source === '') { return new \WP_Error('cart_cat_card', 'The selected card is no longer available for this customer.'); }
-            } elseif ($source_type === 'token') {
-                $source = (string) ($request['token'] ?? '');
-                if (strlen($source) < 6 || strlen($source) > 4096 || preg_match('/[\x00-\x20\x7f]/', $source) || strpos($source, 'ccof:') === 0 || preg_match('/^[0-9]+$/D', $source)) { return new \WP_Error('cart_cat_token', 'Square did not provide a valid one-time payment token.'); }
-            } else { return new \WP_Error('cart_cat_source', 'Select a payment method.'); }
+            $source = self::source($order, $request, $channel); if (is_wp_error($source)) { return $source; }
+            if ($source_type === 'gift_card') {
+                $valid = Split_Payments::validate_request($request); if (is_wp_error($valid)) { return $valid; }
+            }
             $verification = $request['verification_token'] ?? '';
             if (!is_string($verification) || strlen($verification) > 4096 || preg_match('/[\x00-\x20\x7f]/', $verification)) { return new \WP_Error('cart_cat_verification', 'Square did not provide a valid buyer verification token.'); }
             $validation = self::reserve($order); if (is_wp_error($validation)) { return $validation; }
@@ -228,6 +230,7 @@ final class Payments {
             }
             $attempt = array('id' => wp_generate_uuid4(), 'state' => 'creating_order', 'started' => time(), 'amount' => $amount, 'currency' => $order->get_currency(), 'version' => $version, 'fingerprint' => self::fingerprint($order), 'context' => $context, 'channel' => $channel, 'actor' => $channel === 'staff' ? get_current_user_id() : 0, 'source_type' => $source_type, 'customer_id' => $customer, 'square_order_id' => '', 'payment_id' => '', 'reconciliations' => 0);
             $attempt['itemization'] = $itemization;
+            if ($source_type === 'gift_card') { $attempt = Split_Payments::initialize($order, $attempt); }
             self::save($order, $attempt);
             if (Stock_Hold::managed($order)) {
                 // The customer deadline may be seconds away; protect the recorded attempt before provider I/O.
@@ -248,6 +251,7 @@ final class Payments {
             $attempt['square_order_id'] = $sq_order['id'];
             $order->update_meta_data('square_order_id', $sq_order['id']);
             $attempt['state'] = 'charging'; self::save($order, $attempt);
+            if (Split_Payments::owns($attempt)) { return Split_Payments::send($order, $attempt, $request, $channel, $source); }
             $body = array('idempotency_key' => $attempt['id'], 'source_id' => $source, 'amount_money' => array('amount' => $amount, 'currency' => $attempt['currency']), 'autocomplete' => true, 'location_id' => $context['location_id'], 'order_id' => $sq_order['id'], 'reference_id' => self::reference($order, $attempt), 'customer_details' => array('customer_initiated' => true, 'seller_keyed_in' => $channel === 'staff' && $source_type === 'token'));
             if ($channel === 'customer' && $source_type === 'token' && $verification !== '') { $body['verification_token'] = $verification; }
             if ($customer !== '') { $body['customer_id'] = $customer; }
@@ -268,7 +272,21 @@ final class Payments {
             return self::apply_payment($order, $attempt, $response['payment'] ?? array());
         } finally { Payment_Lock::release($lease); }
     }
-    private static function validate_scope($order) {
+    /** Shared source validation; provider IDs are resolved only from staff-bound references. */
+    public static function source($order, array $request, string $channel) {
+        $type = $request['source_type'] ?? '';
+        if ($type === 'card') {
+            if ($channel !== 'staff') { return new \WP_Error('cart_cat_forbidden', 'Stored cards are available only to staff.'); }
+            $cards = self::raw_cards($order); if (is_wp_error($cards)) { return $cards; }
+            foreach ($cards as $card) { if (hash_equals(self::card_reference($order, $card['id']), (string) ($request['card_reference'] ?? ''))) { return $card['id']; } }
+            return new \WP_Error('cart_cat_card', 'The selected card is no longer available for this customer.');
+        }
+        if (!in_array($type, array('token', 'gift_card'), true)) { return new \WP_Error('cart_cat_source', 'Select a payment method.'); }
+        $source = $request['token'] ?? '';
+        if (!is_string($source) || strlen($source) < 6 || strlen($source) > 4096 || preg_match('/[\x00-\x20\x7f]/', $source) || preg_match('/^(?:ccof:|gftc:|[0-9]+$)/', $source)) { return new \WP_Error('cart_cat_token', 'Square did not provide a valid one-time payment token.'); }
+        return $source;
+    }
+    public static function validate_scope($order) {
         $stored = self::meta_array($order, '_cart_cat_square_scope');
         if (empty($stored['application_id']) || empty($stored['location_id']) || empty($stored['currency']) || !in_array($stored['environment'] ?? '', array('production', 'sandbox'), true)) {
             return new \WP_Error('cart_cat_square_scope_missing', 'This order was prepared without a complete Square connection. Review and prepare a new order after configuring Square.');
@@ -276,7 +294,7 @@ final class Payments {
         if ($stored !== Square::scope()) { return new \WP_Error('cart_cat_square_scope_changed', 'The Square connection changed after this order was prepared. Restore the original connection or review and prepare a new order.'); }
         return true;
     }
-    private static function reserve($order) {
+    public static function reserve($order) {
         $validation = Orders::validate_payment($order); if (is_wp_error($validation)) { return $validation; }
         $reservation = self::reserve_native($order);
         return is_wp_error($reservation) ? new \WP_Error('cart_cat_stock', 'Stock could not be reserved. Check stock and retry payment; no charge was sent.') : true;
@@ -307,8 +325,8 @@ final class Payments {
             $order->add_order_note('Cart Cat could not refresh the stock reservation while checking payment. Review inventory and the existing payment; no replacement charge was sent.');
         }
     }
-    private static function reference($order, array $attempt): string { return 'cc-' . $order->get_id() . '-' . substr(str_replace('-', '', $attempt['id']), 0, 24); }
-    private static function create_square_order($order, array $attempt) {
+    public static function reference($order, array $attempt): string { return 'cc-' . $order->get_id() . '-' . substr(str_replace('-', '', $attempt['id']), 0, 24); }
+    public static function create_square_order($order, array $attempt) {
         // Old in-flight attempts must replay their original payload and idempotency key.
         $sale = isset($attempt['itemization']) ? $attempt['itemization']['order'] : array('location_id' => $attempt['context']['location_id'], 'pricing_options' => array('auto_apply_discounts' => false, 'auto_apply_taxes' => false), 'line_items' => array(array('name' => 'WooCommerce order #' . $order->get_order_number(), 'quantity' => '1', 'base_price_money' => array('amount' => $attempt['amount'], 'currency' => $attempt['currency']))));
         $sale['reference_id'] = self::reference($order, $attempt);
@@ -367,6 +385,7 @@ final class Payments {
     }
     private static function reconcile_locked($order, array $attempt) {
         if (self::settled($order)) { return self::result($order); }
+        if (Split_Payments::owns($attempt)) { return Split_Payments::reconcile($order, $attempt); }
         if (($attempt['state'] ?? '') === 'declined') { return self::result($order, 'declined'); }
         if (!hash_equals((string) ($attempt['fingerprint'] ?? ''), self::fingerprint($order))) {
             $attempt['state'] = 'review'; self::save($order, $attempt);
@@ -419,6 +438,19 @@ final class Payments {
     }
     public static function reconcile(int $order_id): void { self::status($order_id); self::reconcile_refund($order_id); }
 
+    public static function cancel_split(int $order_id, array $request, string $channel = 'staff') {
+        if ($channel === 'staff' && !current_user_can('manage_woocommerce')) { return new \WP_Error('cart_cat_forbidden', 'Staff access required.'); }
+        if (!in_array($channel, array('staff', 'customer'), true)) { return new \WP_Error('cart_cat_channel', 'Invalid payment channel.'); }
+        $lease = Payment_Lock::acquire($order_id); if (is_wp_error($lease)) { return $lease; }
+        try {
+            $order = self::order($order_id); if (is_wp_error($order)) { return $order; }
+            $attempt = self::meta_array($order, '_cart_cat_payment_attempt');
+            if (!Split_Payments::owns($attempt) || self::settled($order)) { return self::result($order); }
+            if (!hash_equals((string) $order->get_meta('_cart_cat_version'), (string) ($request['version'] ?? '')) || !hash_equals($attempt['revision'], (string) ($request['payment_revision'] ?? ''))) { return new \WP_Error('cart_cat_payment_changed', 'Payment changed. Reload its current status before cancelling.', array('status' => 409)); }
+            return Split_Payments::cancel($order, $attempt);
+        } finally { Payment_Lock::release($lease); }
+    }
+
     public static function webhook_route(): void {
         register_rest_route('cart-cat/v1', '/square/webhook', array('methods' => 'POST', 'permission_callback' => '__return_true', 'callback' => array(__CLASS__, 'webhook')));
     }
@@ -435,7 +467,7 @@ final class Payments {
         if ($refund_id !== '') {
             $id = (int) get_option('_cart_cat_refund_map_' . hash('sha256', $refund_id), 0);
             $order = $id ? self::order($id) : false;
-            if ($order && !is_wp_error($order) && (string) $order->get_meta('_cart_cat_pending_refund_id', true) === $refund_id) { self::schedule($id); }
+            if ($order && !is_wp_error($order) && ((string) $order->get_meta('_cart_cat_pending_refund_id', true) === $refund_id || in_array($refund_id, (array) $order->get_meta('_cart_cat_pending_refund_ids', true), true))) { self::schedule($id); }
         }
         return new \WP_REST_Response(array('received' => true), 200);
     }
@@ -448,6 +480,7 @@ final class Payments {
         try {
             $order = self::order($order_id); if (is_wp_error($order)) { return $order; }
             $attempt = self::meta_array($order, '_cart_cat_payment_attempt');
+            if (Split_Payments::owns($attempt)) { return Split_Refunds::refund($order, $attempt, $amount, $reason, self::$refund_context[$order_id] ?? 0); }
             if (empty($attempt['payment_id']) || ($attempt['state'] ?? '') !== 'paid') { return new \WP_Error('cart_cat_refund', 'A verified Cart Cat payment is required.'); }
             $minor = self::minor(wc_format_decimal($amount, 2), $order->get_currency());
             if (is_wp_error($minor) || $minor <= 0) { return new \WP_Error('cart_cat_refund_amount', 'Enter a positive refund amount.'); }
@@ -499,6 +532,7 @@ final class Payments {
         try {
             $order = self::order($order_id); if (is_wp_error($order)) { return; }
             $intent = self::meta_array($order, '_cart_cat_refund_intent');
+            if (($intent['schema'] ?? 0) === 2) { Split_Refunds::reconcile($order, $intent); return; }
             if (!$intent || in_array($intent['state'], array('COMPLETED', 'FAILED', 'REJECTED'), true)) { return; }
             $attempt = self::meta_array($order, '_cart_cat_payment_attempt');
             $context = Square::context(); if (is_wp_error($context) || $context !== ($attempt['context'] ?? array())) { self::schedule($order_id); return; }

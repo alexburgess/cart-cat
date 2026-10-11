@@ -69,6 +69,7 @@ final class Stock_Hold {
 		if ( ! is_array( $attempt ) || ! $attempt ) { return 'unpaid'; }
 		if ( 'declined' === ( $attempt['state'] ?? '' ) ) { return 'declined'; }
 		if ( 'paid' === ( $attempt['state'] ?? '' ) && ! empty( $attempt['payment_id'] ) && $order->get_transaction_id() === $attempt['payment_id'] ) { return 'paid'; }
+		if ( Split_Payments::owns( $attempt ) && 'partial' === $attempt['state'] ) { return 'partial'; }
 		return 'checking';
 	}
 	public static function expired( $order ): bool {
@@ -92,7 +93,7 @@ final class Stock_Hold {
 		if ( ! self::managed( $order ) ) { return (int) $minutes; }
 		$remaining = max( 0, (int) ceil( ( (int) $order->get_meta( '_cart_cat_expires_at' ) - time() ) / MINUTE_IN_SECONDS ) );
 		// A payment already sent must be reconciled even after its customer deadline.
-		return 'checking' === self::payment_status( $order ) ? max( 15, $remaining ) : $remaining;
+		return in_array( self::payment_status( $order ), array( 'checking', 'partial' ), true ) ? max( 15, $remaining ) : $remaining;
 	}
 	public static function native_cancellation( $cancel, $order ): bool {
 		// Only the Cart Cat callback owns the payment mutex and may cancel these orders.

@@ -2,14 +2,14 @@
 /**
  * Plugin Name: Cart Cat
  * Description: Prepare customer orders with WooCommerce pricing, shipping and Square payments.
- * Version: 0.1.11
+ * Version: 0.1.13
  * Requires at least: 6.5
  * Requires PHP: 8.1
  * Requires Plugins: woocommerce
  * Text Domain: cart-cat
  */
 defined( 'ABSPATH' ) || exit;
-define( 'CART_CAT_VERSION', '0.1.11' );
+define( 'CART_CAT_VERSION', '0.1.13' );
 define( 'CART_CAT_PATH', plugin_dir_path( __FILE__ ) );
 define( 'CART_CAT_URL', plugin_dir_url( __FILE__ ) );
 spl_autoload_register( static function ( $class ) {

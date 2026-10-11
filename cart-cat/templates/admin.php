@@ -50,6 +50,7 @@ defined( 'ABSPATH' ) || exit;
 				</section>
 				<section class="cc-card" aria-labelledby="cc-delivery-heading">
 					<div class="cc-section-heading"><h2 id="cc-delivery-heading"><span class="cc-step" aria-hidden="true">3</span><?php esc_html_e( 'Pickup or shipping', 'cart-cat' ); ?></h2></div>
+					<label class="cc-checkbox" for="cc-somminar-order"><input type="checkbox" id="cc-somminar-order" name="somminar_order" /><span><?php esc_html_e( 'Is this a SOMMinar order', 'cart-cat' ); ?></span></label>
 					<div class="cc-fulfillment-options">
 						<label class="cc-choice"><input type="radio" name="cc-fulfillment" value="pickup" checked /><span><strong><?php esc_html_e( 'Pickup at the winery', 'cart-cat' ); ?></strong><small><?php esc_html_e( 'Local pickup · Virginia tax', 'cart-cat' ); ?></small></span></label>
 						<label class="cc-choice"><input type="radio" name="cc-fulfillment" value="shipping" /><span><strong><?php esc_html_e( 'Ship to the customer', 'cart-cat' ); ?></strong><small><?php esc_html_e( 'Store shipping rates and tax', 'cart-cat' ); ?></small></span></label>

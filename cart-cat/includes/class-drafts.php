@@ -45,7 +45,9 @@ final class Drafts {
 	/** Incomplete values are preserved as inert text; only Quote/Catalog can authorize preparation. */
 	private static function input( $raw ) {
 		if ( ! is_array( $raw ) || strlen( (string) wp_json_encode( $raw ) ) > 131072 || ! is_array( $raw['lines'] ?? array() ) || count( $raw['lines'] ?? array() ) > 100 ) { return self::error( 'draft_input', 'Save at most 100 product lines and 128 KB of draft details.', 422 ); }
-		$out = array( 'customer' => array(), 'lines' => array() );
+		$order_type = array_key_exists( 'order_type', $raw ) ? $raw['order_type'] : 'regular';
+		if ( ! in_array( $order_type, array( 'regular', 'somminar' ), true ) ) { return self::error( 'order_type', 'Choose a regular or SOMMinar order.', 422 ); }
+		$out = array( 'customer' => array(), 'lines' => array(), 'order_type' => $order_type );
 		$customer = is_array( $raw['customer'] ?? null ) ? $raw['customer'] : array();
 		foreach ( array( 'first_name', 'last_name', 'email', 'phone' ) as $key ) { $out['customer'][ $key ] = self::text( $customer[ $key ] ?? '' ); }
 		foreach ( array( 'billing', 'shipping' ) as $kind ) {

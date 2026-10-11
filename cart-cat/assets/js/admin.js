@@ -471,6 +471,7 @@
 		return {
 			customer,
 			hold_minutes: Number(state.editingOrder?.hold?.minutes ?? state.editingOrder?.input?.hold_minutes ?? state.draft?.input?.hold_minutes ?? holdDefault),
+			order_type: $('cc-somminar-order').checked ? 'somminar' : 'regular',
 			order_notes: $('cc-order-notes').value,
 			order_notes_visible: $('cc-order-notes-visible').checked,
 			lines: state.lines.map((line) => ({ product_id: line.product_id, variation_id: line.variation_id || 0, quantity: line.quantity, addons: line.addons || {}, attributes: line.attributes || {} })),
@@ -934,15 +935,16 @@
 		syncNewOrderControls();
 		const back = $('cc-back-to-details');
 		back.hidden = Boolean(state.order?.paid || state.order?.expired);
-		back.disabled = state.order?.can_edit === false || state.paymentBusy || state.paymentChecking || state.paymentMounting || state.emailBusy;
+		back.disabled = state.order?.can_edit === false || state.order?.payment?.can_cancel || state.paymentBusy || state.paymentChecking || state.paymentMounting || state.emailBusy;
 		const explanation = $('cc-edit-status');
-		explanation.textContent = state.order?.can_edit === false && !state.order?.paid && !state.order?.expired ? state.order.edit_message || 'This order cannot be changed here. Review it in WooCommerce.' : '';
+		explanation.textContent = state.order?.payment?.can_cancel ? 'Complete or cancel the applied payments before changing order details.' : state.order?.can_edit === false && !state.order?.paid && !state.order?.expired ? state.order.edit_message || 'This order cannot be changed here. Review it in WooCommerce.' : '';
 		explanation.hidden = !explanation.textContent;
 	}
 	function hydrateOrder(order) {
 		const input = order.input;
 		if (!input) throw new Error('These order details cannot be restored here. Open the order in WooCommerce to review it.');
 		revealCustomer();
+		$('cc-somminar-order').checked = (input.order_type || order.review?.order_type) === 'somminar';
 		$('cc-order-notes').value = input.order_notes ?? order.order_notes ?? '';
 		$('cc-order-notes-visible').checked = input.order_notes_visible ?? order.order_notes_visible ?? false;
 		setHoldMinutes(input.hold_minutes ?? order.hold?.minutes ?? holdDefault);
@@ -1038,7 +1040,8 @@
 		});
 		const fulfillment = el('div', { class: 'cc-review-section cc-review-fulfillment' });
 		const shipping = input?.fulfillment?.type === 'shipping';
-		fulfillment.append(el('h3', {}, shipping ? 'Shipping' : 'Pickup at the winery'));
+		const somminar = (input?.order_type || review?.order_type) === 'somminar';
+		fulfillment.append(el('h3', {}, somminar ? `SOMMinar™ ${shipping ? 'Shipment' : 'Pickup'}` : shipping ? 'Shipping' : 'Pickup at the winery'));
 		if (shipping) {
 			const address = el('div', { class: 'cc-address-summary' });
 			const destination = input.customer.shipping || {};
@@ -1069,7 +1072,7 @@
 		}
 	}
 	function holdExpired(order) {
-		if (!order || order.paid || order.payment_status === 'paid' || order.payment_status === 'checking') return false;
+		if (!order || order.paid || ['paid', 'checking', 'partial'].includes(order.payment_status)) return false;
 		return order.status === 'cancelled' || (['pending', 'failed'].includes(order.status) && Number(order.hold?.expires_at) > 0 && Number(order.hold.expires_at) * 1000 <= Date.now());
 	}
 	function expired() {
@@ -1113,6 +1116,7 @@
 		if (order.paid || order.payment_status === 'paid') { paid(); return; }
 		if (order.payment_status === 'checking') {
 			$('cc-payment-content').replaceChildren(el('p', { id: 'cc-payment-checking-view' }, 'Payment is being checked. Stock remains reserved until the result is confirmed.'));
+			renderApplied($('cc-payment-content'));
 			startChecking();
 		} else if (holdExpired(order)) {
 			expired();
@@ -1120,7 +1124,7 @@
 			$('cc-payment-heading').textContent = 'Order needs review';
 			$('cc-payment-content').replaceChildren(orderLink('Review order in WooCommerce', order.edit_url, 'button button-primary'));
 			message('cc-payment-message', order.edit_message || 'The saved details could not be restored for editing. Review this order in WooCommerce. Payment remains paused.', 'warning');
-		} else if (order.payment_email?.accepted === true && order.payment_email.version === order.version) {
+		} else if (!order.payment?.can_cancel && order.payment_email?.accepted === true && order.payment_email.version === order.version) {
 			renderEmailResult(order.payment_email.recipient);
 		} else {
 			state.emailSent = false;
@@ -1130,8 +1134,10 @@
 		root.scrollIntoView({ block: 'start' });
 	}
 	function renderPayment() {
+		state.paymentController?.destroy().catch(() => {}); state.paymentController = null;
 		const box = $('cc-payment-content');
 		box.replaceChildren();
+		renderApplied(box);
 		if (Number(state.order.total) === 0) {
 			box.append(el('p', {}, 'No payment is due. Complete this order to begin fulfillment.'));
 			box.append(button('Complete free order', completeFree, 'button button-primary'));
@@ -1141,17 +1147,45 @@
 		const email = el('div', { class: 'cc-payment-option' });
 		email.append(el('h3', {}, 'Let the customer pay'), el('p', {}, 'Email the order with a secure link to complete payment.'));
 		if (state.order.billing?.email) email.append(el('p', { class: 'cc-email-recipient' }, `To: ${state.order.billing.email}`));
-		email.append(button(state.order.payment_email?.uncertain ? 'Review email status' : 'Send order email', openEmailSetup));
+		const emailButton = button(state.order.payment_email?.uncertain ? 'Review email status' : 'Send order email', openEmailSetup);
+		emailButton.disabled = Boolean(state.order.payment?.can_cancel);
+		email.append(emailButton);
+		if (state.order.payment?.can_cancel) email.append(el('p', {class: 'cc-help'}, 'Complete or cancel the applied payments before sending an email.'));
 		const manual = el('div', { class: 'cc-payment-option' });
 		manual.append(el('h3', {}, 'Take payment now'), el('p', {}, config.square?.ready ? 'Enter the customer’s card using Square’s secure payment form.' : 'Square is not connected. You can email the customer a payment link.'));
 		const manualButton = button('Manual card entry', mountManual);
 		manualButton.disabled = !config.square?.ready;
 		manual.append(manualButton);
+		const giftButton = button('Use Square gift card', event => mountManual(event, 'gift_card'));
+		giftButton.disabled = !config.square?.ready;
+		manual.append(giftButton);
 		const saved = el('div', { id: 'cc-saved-cards', class: 'cc-payment-option cc-saved-cards' });
 		saved.append(el('h3', {}, 'Cards on file'), el('p', { class: 'cc-help', role: 'status' }, config.square?.ready ? 'Checking the selected customer’s saved cards…' : 'Connect Square to view this customer’s saved cards.'));
 		options.append(email, manual, saved); box.append(options);
 		box.append(el('div', { id: 'cc-manual-card', class: 'cc-payment-card-form', hidden: true }));
 		if (config.square?.ready) loadCards();
+	}
+	function paymentAmount() { return state.order.payment?.remaining ?? state.order.total; }
+	function renderApplied(box) {
+		const payment = state.order.payment;
+		if (!payment || (!payment.tenders.length && !payment.can_cancel)) return;
+		const summary = el('div', {class: 'cc-applied-payments'});
+		summary.append(el('h3', {}, 'Applied payments'));
+		payment.tenders.forEach(tender => summary.append(el('p', {}, `${tender.kind === 'gift_card' ? 'Gift card' : 'Card'}${tender.last4 ? ` •••• ${tender.last4}` : ''}: ${money(tender.amount)} reserved`)));
+		summary.append(el('strong', {}, `Remaining to pay: ${money(payment.remaining)}`));
+		if (payment.can_cancel) {
+			summary.append(el('p', {class: 'cc-help'}, `Complete this payment by ${new Date(payment.expires_at * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}. Unused authorizations will be cancelled.`));
+			const cancel = button('Cancel applied payments', cancelPayments);
+			cancel.dataset.ccCancelPayments = '1'; summary.append(cancel);
+		}
+		box.append(summary);
+	}
+	async function cancelPayments() {
+		if (state.cancelBusy || state.order.paid || !state.order.payment?.can_cancel) return;
+		state.cancelBusy = true; setPaymentBusy(true);
+		try { paymentResult(await api(`orders/${state.order.order_id}/payment/cancel`, {version: state.order.version, payment_revision: state.order.payment.revision})); }
+		catch (error) { startChecking(`Checking cancellation. ${error.message}`); }
+		finally { state.cancelBusy = false; }
 	}
 	function renderEmailResult(recipient) {
 		state.emailSent = true;
@@ -1286,7 +1320,7 @@
 				label.append(el('input', { type: 'radio', name: 'cc-saved-card', value: card.reference }), el('span', {}, `${card.brand} •••• ${card.last4} · ${card.expiry_month}/${card.expiry_year}`));
 				box.append(label);
 			});
-			box.append(button(`Charge saved card · ${money(state.order.total)}`, () => {
+			box.append(button(`Charge saved card · ${money(paymentAmount())}`, () => {
 				const selected = box.querySelector('input:checked');
 				if (!selected) { message('cc-payment-message', 'Select a card on file first.', 'error'); return; }
 				pay({ source_type: 'card', card_reference: selected.value });
@@ -1296,32 +1330,37 @@
 			if (error.name !== 'AbortError' && activeRequest('cards', request)) box.replaceChildren(el('h3', {}, 'Cards on file'), el('p', { class: 'cc-help', role: 'status' }, `Saved cards could not be loaded. ${error.message}`));
 		}
 	}
-	async function mountManual(event) {
+	async function mountManual(event, method = 'token') {
 		if (state.paymentBusy || state.paymentChecking || state.paymentMounting || state.emailSent || state.order.paid) return;
 		const box = $('cc-manual-card');
-		if (state.paymentController) { box.hidden = false; return; }
+		if (state.paymentController && state.paymentMethod === method) { box.hidden = false; return; }
 		state.paymentMounting = true;
 		paymentNavigation();
+		await state.paymentController?.destroy().catch(() => {}); state.paymentController = null;
+		state.paymentMethod = method;
 		if (event?.currentTarget) event.currentTarget.disabled = true;
 		box.hidden = false;
-		box.replaceChildren(el('h3', {}, 'Enter card details'), el('p', { class: 'cc-help' }, 'The card details are entered securely with Square and are not saved on this website.'));
+		const gift = method === 'gift_card';
+		box.replaceChildren(el('h3', {}, gift ? 'Square gift card' : 'Enter card details'), el('p', { class: 'cc-help' }, gift ? 'Apply the available gift card funds, then pay any remaining amount by card. The number is entered securely with Square.' : 'The card details are entered securely with Square and are not saved on this website.'));
 		const mount = el('div');
 		box.append(mount);
-		const control = button(`Charge card · ${money(state.order.total)}`, async () => {
+		const control = button(gift ? 'Apply gift card' : `Charge card · ${money(paymentAmount())}`, async () => {
 			if (state.paymentBusy || state.paymentChecking) return;
 			setPaymentBusy(true);
 			message('cc-payment-message', 'Checking card details…');
 			try {
 				const token = await state.paymentController.tokenize();
-				await pay({ source_type: 'token', token }, true);
+				await pay({ source_type: method, token }, true);
 			} catch (error) { message('cc-payment-message', error.message || 'The card could not be verified.', 'error'); setPaymentBusy(false); }
 		}, 'button button-primary');
 		control.disabled = true;
 		box.append(control);
 		try {
 			if (!window.CartCatPayment) throw new Error('The secure payment form is unavailable. Reload this order and try again.');
-			state.paymentController = await window.CartCatPayment.mount(mount, { config: config.square, amount: String(state.order.total), currency: state.order.currency, billing: state.order.billing || getInput().customer.billing, channel: 'staff' });
-			control.disabled = false;
+			const controller = await window.CartCatPayment.mount(mount, { config: config.square, amount: String(paymentAmount()), currency: state.order.currency, billing: state.order.billing || getInput().customer.billing, channel: 'staff', method });
+			if (state.paymentChecking || state.order.paid || !mount.isConnected) { await controller.destroy(); return; }
+			state.paymentController = controller;
+			control.disabled = state.paymentBusy;
 		} catch (error) { message('cc-payment-message', error.message, 'error'); }
 		finally { state.paymentMounting = false; paymentNavigation(); if (event?.target) event.target.disabled = state.paymentBusy || state.paymentChecking; }
 	}
@@ -1329,13 +1368,18 @@
 		state.paymentBusy = busy;
 		paymentNavigation();
 		$('cc-payment-content').querySelectorAll('button,input').forEach((node) => { node.disabled = busy || state.paymentChecking; });
+		if (state.order?.payment?.can_cancel) {
+			$('cc-payment-content').querySelectorAll('.cc-payment-option:first-child button').forEach(node => { node.disabled = true; });
+			const cancel = $('cc-payment-content').querySelector('[data-cc-cancel-payments]');
+			if (cancel && state.paymentChecking) cancel.disabled = Boolean(state.cancelBusy);
+		}
 	}
 	async function pay(source, alreadyBusy = false) {
 		if (state.emailSent || state.paymentChecking || state.order.paid || (state.paymentBusy && !alreadyBusy)) return;
 		setPaymentBusy(true);
 		message('cc-payment-message', 'Processing payment. Keep this order open.');
 		try {
-			const result = await api(`orders/${state.order.order_id}/pay`, { ...source, version: state.order.version });
+			const result = await api(`orders/${state.order.order_id}/pay`, { ...source, version: state.order.version, request_id: uid(), payment_revision: state.order.payment?.revision || '' });
 			paymentResult(result);
 		} catch (error) {
 			// The browser cannot know whether a failed response happened before or after a charge.
@@ -1365,27 +1409,37 @@
 		}
 	}
 	function paymentResult(result) {
-		if (!result || Number(result.order_id) !== Number(state.order.order_id) || !['paid', 'declined', 'unpaid', 'checking'].includes(result.status)) {
+		if (!result || Number(result.order_id) !== Number(state.order.order_id) || !['paid', 'declined', 'unpaid', 'partial', 'checking'].includes(result.status)) {
 			startChecking('Checking payment with Square. This order remains locked until the payment result is confirmed.');
 			return;
 		}
 		state.order.payment_status = result.status;
+		const hadSplit = Boolean(state.order.payment);
+		state.order.payment = result.payment || null;
 		if (result.status === 'paid') { paid(result); return; }
 		if (result.status === 'checking') { startChecking(result.message); return; }
 		if (holdExpired(state.order)) { expired(); return; }
 		state.paymentChecking = false;
 		clearTimeout(state.paymentPoll);
 		setPaymentBusy(false);
-		if ($('cc-payment-checking-view')) showOrder();
+		if (result.payment || hadSplit) { state.emailSent = false; renderPayment(); paymentNavigation(); }
+		else if ($('cc-payment-checking-view')) showOrder();
 		refreshEditability();
 		const defaultMessage = state.emailSent
 			? (result.status === 'declined' ? 'The customer’s payment was declined. They can try again using the emailed link.' : '')
 			: (result.status === 'declined' ? 'The card was declined. Choose a different payment method or email the customer.' : 'No payment was taken. You can try again.');
-		message('cc-payment-message', result.message || defaultMessage, result.status === 'declined' ? 'error' : 'warning');
+		message('cc-payment-message', result.message || (result.status === 'partial' ? `Gift card funds are reserved. Pay the remaining ${money(paymentAmount())} to complete the order.` : defaultMessage), result.status === 'declined' ? 'error' : 'warning');
 	}
 	function startChecking(text) {
 		state.paymentChecking = true;
 		state.order.payment_status = 'checking';
+		if (state.order.payment && (!$('cc-payment-checking-view') || state.checkingRevision !== state.order.payment.revision)) {
+			state.requests.cards?.abort();
+			state.paymentController?.destroy().catch(() => {}); state.paymentController = null;
+			$('cc-payment-content').replaceChildren(el('p', {id: 'cc-payment-checking-view'}, 'Payment is being checked. Stock remains reserved until the result is confirmed.'));
+			renderApplied($('cc-payment-content'));
+			state.checkingRevision = state.order.payment.revision;
+		}
 		setPaymentBusy(true);
 		message('cc-payment-message', text || 'Checking payment with Square. Please wait before trying any other payment method.', 'warning');
 		clearTimeout(state.paymentPoll);

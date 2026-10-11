@@ -67,6 +67,7 @@ try {
 	$product = new WC_Product_Simple(); $product->set_name( 'Draft fixture wine ' . $suffix ); $product->set_status( 'publish' ); $product->set_regular_price( '20' ); $product->set_tax_status( 'none' ); $product->set_manage_stock( true ); $product->set_stock_quantity( 10 ); $product->save();
 	$address = array( 'first_name' => 'Native', 'last_name' => 'Recipient', 'email' => 'native-recipient@example.test', 'phone' => '2025550111', 'address_1' => '123 Fixture Lane', 'address_2' => '', 'city' => 'Leesburg', 'state' => 'VA', 'country' => 'US', 'postcode' => '20175' );
 	$full = array( 'customer' => array( 'reference' => '', 'first_name' => 'Native', 'last_name' => 'Buyer', 'email' => 'native-buyer@example.test', 'phone' => '2025550100', 'billing' => $address, 'shipping' => $address ), 'lines' => array( array( 'product_id' => $product->get_id(), 'variation_id' => 0, 'quantity' => 2, 'attributes' => array(), 'addons' => array() ) ), 'discount' => array( 'type' => 'percent', 'amount' => 0, 'mode' => 'add' ), 'fulfillment' => array( 'type' => 'shipping', 'rates' => array( 'flat_rate:' . $instance ), 'heat_hold_choice' => '' ), 'hold_minutes' => 60, 'order_notes' => '', 'order_notes_visible' => false );
+	$full['order_type'] = 'somminar';
 	$prepared_draft = $ok( Drafts::save( 0, array( 'input' => $full, 'request_id' => 'native-ready-' . wp_generate_uuid4() ) ) ); $drafts[] = $prepared_draft['draft_id'];
 	$assert( 0 === $new_orders && 10 === wc_get_product( $product->get_id() )->get_stock_quantity(), 'Saving a complete draft still creates no order or stock deduction.' );
 	$quote = $ok( Quote::calculate( $full ) ); $assert( $quote['can_submit'], 'Native current Woo shipping quote can prepare.' );
@@ -74,6 +75,7 @@ try {
 	$result = $ok( Drafts::prepare( $prepared_draft['draft_id'], $prepare_request ) ); $orders[] = $result['order_id'];
 	$assert( 1 === $new_orders && 'pending' === $result['status'], 'Only explicit preparation creates one pending Woo order.' );
 	$saved_order = wc_get_order( $result['order_id'] );
+	$assert( 'somminar' === $ok( Drafts::get( $prepared_draft['draft_id'] ) )['input']['order_type'] && 'somminar' === $saved_order->get_meta( '_pupel_order_type' ) && 'somminar' === $result['input']['order_type'], 'SOMMinar type survives native draft storage, preparation, and actual Woo metadata.' );
 	$assert( '2025550111' === $saved_order->get_shipping_phone() && 'native-recipient@example.test' === $saved_order->get_meta( '_shipping_email' ), 'Actual Woo storage preserves recipient phone and email.' );
 	$assert( '2025550100' === $saved_order->get_billing_phone() && 'native-buyer@example.test' === $saved_order->get_billing_email(), 'Recipient contact remains independent of the purchaser billing contact.' );
 	$reopened_order = $ok( Orders::get( $result['order_id'] ) );
@@ -85,6 +87,7 @@ try {
 	wp_set_current_user( $users[0] ); $prepare_request['request_id'] = 'native-other-staff-' . wp_generate_uuid4();
 	$again = $ok( Drafts::prepare( $prepared_draft['draft_id'], $prepare_request ) );
 	$assert( $result['order_id'] === $again['order_id'] && 1 === $new_orders, 'Cross-staff conflicting retry recovers one native order.' );
+	$assert( 'somminar' === $again['input']['order_type'], 'Preparation retries retain the stored SOMMinar identity.' );
 	$record['state'] = 'preparing'; unset( $record['order_id'] );
 	wp_update_post( wp_slash( array( 'ID' => $prepared_draft['draft_id'], 'post_content' => wp_json_encode( $record ) ) ) );
 	$recover = $ok( Drafts::get( $prepared_draft['draft_id'] ) );

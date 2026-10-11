@@ -3,7 +3,7 @@ Requires at least: 6.5
 Requires PHP: 8.1
 Requires Plugins: woocommerce
 Tested up to: 7.1
-Stable tag: 0.1.11
+Stable tag: 0.1.13
 
 Prepare WooCommerce customer orders with store pricing, fulfillment, tax, and Square payment.
 
@@ -13,6 +13,12 @@ Cart Cat is a staff-only order preparation screen for WooCommerce administrators
 Install the supplied Quantity Crab and SquareWooSync compatibility changes before enabling payments. Use HTTPS and validate in a Square Sandbox staging environment before production release. Full installation and validation notes are included in the delivery bundle.
 
 == Changelog ==
+
+= 0.1.13 =
+Add the SOMMinar order option, retain it through saved drafts, order review and payment retries, and tag prepared orders for Pick Up Pelican display and filtering.
+
+= 0.1.12 =
+Accept Square gift cards in staff and customer payment forms, with multiple gift cards and a card or wallet remainder. Reserve funds until the full order can be captured, recover interrupted payments, cancel unused authorizations and refund across the original payment sources.
 = 0.1.11 =
 Save unfinished orders as shared, searchable drafts and reopen them without reserving stock. Add Google address search and optional UPS address validation with reviewed corrections. Capture separate shipping-recipient email and phone, retain purchaser billing for payment emails, and supply recipient contacts to recognized Shippo exports. Preserve one-order preparation and safe retries across draft edits and staff sessions.
 

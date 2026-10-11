@@ -139,6 +139,8 @@ const server = http.createServer(async (req, res) => {
 		assert.equal(new URL(page.url()).origin, origin);
 		await page.getByRole('heading', { name: 'Cart Cat', exact: true }).waitFor();
 		assert.equal(await page.locator('vite-error-overlay, nextjs-portal').count(), 0);
+		assert(!await page.getByRole('checkbox', { name: 'Is this a SOMMinar order', exact: true }).isChecked());
+		await page.getByRole('checkbox', { name: 'Is this a SOMMinar order', exact: true }).check();
 		await page.locator('#cc-draft-title').fill('Unfinished gift');
 		await page.locator('[name="cc-fulfillment"][value="shipping"]').check();
 		await page.locator('#cc-shipping-first_name').fill('Gift recipient');
@@ -158,12 +160,14 @@ const server = http.createServer(async (req, res) => {
 		assert.equal(drafts.size, initialDraftCount + 1, 'Retrying the uncertain save does not create a second draft');
 		assert(!await page.locator('#cc-builder').evaluate((fieldset) => fieldset.disabled));
 		assert.equal(drafts.get(firstId).title, 'Unfinished gift');
+		assert.equal(drafts.get(firstId).input.order_type, 'somminar', 'SOMMinar selection survives an uncertain draft save retry');
 		assert.equal(drafts.get(firstId).input.lines.length, 0);
 		assert.equal(drafts.get(firstId).input.customer.shipping.email, 'not-an-email', 'Drafts can preserve incomplete recipient details');
 		assert(new URL(page.url()).searchParams.get('cc_draft') === String(firstId), 'Saved draft has a reloadable URL');
 		noCommerceWrites();
 		await page.goto(origin); await openDrafts(); await load(firstId, 'Unfinished');
 		assert.equal(await page.locator('#cc-draft-title').inputValue(), 'Unfinished gift');
+		assert(await page.locator('#cc-somminar-order').isChecked(), 'Saved SOMMinar selection is restored on load');
 		assert.equal(await page.locator('#cc-shipping-first_name').inputValue(), 'Gift recipient');
 		assert.equal(await page.locator('#cc-shipping-email').inputValue(), 'not-an-email');
 		assert.equal(await page.locator('.cc-line').count(), 0);
@@ -192,6 +196,7 @@ const server = http.createServer(async (req, res) => {
 		assert.equal(drafts.get(firstId).input.order_notes, 'Merged after reviewing the newer saved draft');
 		await page.locator('#cc-new-draft').click();
 		assert.equal(await page.locator('#cc-draft-title').inputValue(), '');
+		assert(!await page.locator('#cc-somminar-order').isChecked(), 'A new draft resets to a regular order');
 		assert.equal(await page.locator('.cc-line').count(), 0);
 		assert(!new URL(page.url()).searchParams.has('cc_draft'));
 		await page.locator('#cc-draft-title').fill('Separate saved cart');
@@ -243,6 +248,14 @@ const server = http.createServer(async (req, res) => {
 		assert.equal(await page.locator('#cc-shipping-email').inputValue(), 'recipient@example.test');
 		noCommerceWrites(); assert.equal(logs.prepares.length, 0);
 		assert.equal(logs.requests.filter((request) => /^orders(?:\/|$)/.test(request.route)).length, 0, 'Unprepared drafts never request order or payment endpoints');
+		await page.getByRole('checkbox', { name: 'Is this a SOMMinar order', exact: true }).check();
+		await page.waitForFunction(() => !document.getElementById('cc-create-order').disabled);
+		assert.equal(logs.quotes.at(-1).order_type, 'somminar', 'Changing the type gets a fresh quote');
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.locator('#cc-somminar-order').scrollIntoViewIfNeeded();
+		assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'SOMMinar control fits a narrow viewport');
+		await page.screenshot({ path: path.join(evidence, 'somminar-mobile.png') });
+		await page.setViewportSize({ width: 1440, height: 1000 });
 		const quoteBeforeSave = copy(logs.quotes.at(-1)), quoteCountBeforeSave = logs.quotes.length;
 		await page.locator('#cc-save-draft').click(); await waitCount(logs.updates, 4); await idleSave();
 		await page.waitForFunction(() => !document.getElementById('cc-create-order').disabled);
@@ -254,6 +267,9 @@ const server = http.createServer(async (req, res) => {
 		await waitCount(logs.prepares, 1);
 		await page.locator('#cc-payment-panel').waitFor();
 		assert.equal(logs.prepares[0].route, 'drafts/10/prepare');
+		assert.equal(logs.prepares[0].input.order_type, 'somminar', 'Prepare sends the selected order type');
+		await page.getByRole('heading', { name: 'SOMMinar™ Pickup', exact: true }).waitFor();
+		await page.screenshot({ path: path.join(evidence, 'somminar-prepared-desktop.png'), fullPage: true });
 		assert.equal(new URL(page.url()).searchParams.get('cc_order'), '700');
 		assert(!new URL(page.url()).searchParams.has('cc_draft'));
 		noCommerceWrites();

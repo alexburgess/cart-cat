@@ -25,6 +25,7 @@ final class REST {
 			array( '/orders/(?P<id>\d+)/email', 'POST', static function ( $r ) { return Orders::email( (int) $r['id'], (array) $r->get_json_params() ); } ),
 			array( '/orders/(?P<id>\d+)/cards', 'GET', static function ( $r ) { return Payments::cards( (int) $r['id'] ); } ),
 			array( '/orders/(?P<id>\d+)/pay', 'POST', static function ( $r ) { return Payments::pay( (int) $r['id'], (array) $r->get_json_params(), 'staff' ); } ),
+			array( '/orders/(?P<id>\d+)/payment/cancel', 'POST', static function ( $r ) { return Payments::cancel_split( (int) $r['id'], (array) $r->get_json_params(), 'staff' ); } ),
 			array( '/orders/(?P<id>\d+)/payment', 'GET', static function ( $r ) { return Payments::status( (int) $r['id'] ); } ),
 			array( '/orders/(?P<id>\d+)/complete', 'POST', static function ( $r ) { return Orders::complete_free( (int) $r['id'] ); } ),
 		);

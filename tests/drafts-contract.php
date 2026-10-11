@@ -92,11 +92,17 @@ namespace {
 	$is_error = static function ( $v, $code ) { return is_wp_error( $v ) && $v->get_error_code() === $code; };
 	$reference = ( new \ReflectionMethod( Customers::class, 'issue_reference' ) )->invoke( null, 55, 'square-customer-55' );
 	$input = array( 'customer' => array( 'reference' => $reference, 'first_name' => 'Saved', 'last_name' => 'Customer', 'email' => 'unfinished@', 'woo_id' => 999, 'roles' => array( 'administrator' ), 'billing' => array( 'address_1' => '<b>1 Draft Lane</b>' ), 'shipping' => array( 'email' => 'recipient@example.test', 'phone' => '2025550102' ) ), 'lines' => array( array( 'product_id' => 123, 'quantity' => '', 'name' => '<b>Display wine</b>', 'addons' => array( 'message' => "O'Reilly\\notes\nnext line" ), 'price' => 0 ) ) );
+	$input['order_type'] = 'somminar';
 	$save = array( 'input' => $input, 'title' => 'Special shipment', 'request_id' => 'draft-create-request-0001' );
 	Drafts::register_type();
 	$assert( false === $GLOBALS['draft_type']['public'] && false === $GLOBALS['draft_type']['show_in_rest'], 'Draft storage is private and not exposed in native REST.' );
 	$d = $ok( Drafts::save( 0, $save ) ); $id = $d['draft_id'];
 	$assert( 'draft' === $d['state'] && $d['can_edit'], 'Incomplete form saves as editable draft.' );
+	$assert( 'somminar' === $d['input']['order_type'] && 'somminar' === $ok( Drafts::get( $id ) )['input']['order_type'], 'SOMMinar order type survives draft save and reload.' );
+	foreach ( array( 'club', 'SOMMinar', '', null, false, array() ) as $invalid_type ) {
+		$bad_type = $save; $bad_type['input']['order_type'] = $invalid_type;
+		$assert( $is_error( Drafts::save( 0, $bad_type ), 'cart_cat_order_type' ), 'Unrecognized order types cannot be saved in a draft.' );
+	}
 	$assert( 'unfinished@' === $d['input']['customer']['email'] && '' === $d['input']['lines'][0]['quantity'], 'Incomplete email and quantity survive saving.' );
 	$assert( '1 Draft Lane' === $d['input']['customer']['billing']['address_1'] && 'Display wine' === $d['input']['lines'][0]['name'], 'Display and address fields are sanitized.' );
 	$assert( ! isset( $d['input']['customer']['woo_id'], $d['input']['customer']['roles'], $d['input']['lines'][0]['price'] ), 'Client identity/roles/prices do not enter saved input.' );
@@ -111,6 +117,7 @@ namespace {
 	$update = array( 'input' => $d['input'], 'title' => 'Updated draft', 'version' => $d['version'], 'request_id' => 'draft-update-request-0001' );
 	$updated = $ok( Drafts::save( $id, $update ) );
 	$assert( $updated['version'] !== $d['version'], 'Saving rotates optimistic version.' );
+	$assert( 'somminar' === $updated['input']['order_type'], 'Draft updates retain the selected type.' );
 	$assert( $updated['version'] === $ok( Drafts::save( $id, $update ) )['version'], 'An update retry does not change version.' );
 	$assert( $is_error( Drafts::save( 0, $save ), 'cart_cat_draft_changed' ), 'A create retry after later edits cannot grant the newer revision to an old form.' );
 	$newer = $update; $newer['input'] = $updated['input']; $newer['version'] = $updated['version']; $newer['request_id'] = 'newer-update-request-001';
@@ -133,6 +140,7 @@ namespace {
 	$guest = array( 'input' => array( 'customer' => array( 'woo_id' => 55, 'square_id' => 'attacker' ), 'lines' => array() ), 'request_id' => 'guest-create-request-0001' );
 	$g = $ok( Drafts::save( 0, $guest ) ); $graw = json_decode( get_post( $g['draft_id'] )->post_content, true );
 	$assert( 0 === $graw['identity']['woo_id'] && '' === $graw['identity']['square_id'], 'Unreferenced client IDs stay guest.' );
+	$assert( 'regular' === $g['input']['order_type'], 'Older and unmarked drafts default to regular orders.' );
 	$assert( $is_error( Drafts::delete( $g['draft_id'], 'stale' ), 'cart_cat_draft_changed' ), 'Deletion checks optimistic version.' );
 	$assert( $ok( Drafts::delete( $g['draft_id'], $g['version'] ) )['deleted'], 'Unused draft can be deleted.' );
 	$assert( $is_error( Drafts::get( $g['draft_id'] ), 'cart_cat_draft_not_found' ), 'Deleted content cannot be reopened.' );

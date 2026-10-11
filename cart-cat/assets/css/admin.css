@@ -130,6 +130,10 @@
 .cc-saved-cards { min-width: 0; }
 .cc-saved-cards .cc-radio { font-size: 12px; overflow-wrap: anywhere; }
 .cc-payment-card-form h3 { margin-bottom: 15px; }
+.cc-applied-payments { margin-bottom: 20px; padding: 16px; border: 1px solid #c3d9cd; border-radius: 4px; background: #f4faf6; }
+.cc-applied-payments h3 { margin-top: 0; }
+.cc-applied-payments strong { display: block; margin: 12px 0; font-size: 17px; }
+.cc-payment-option .button + .button { margin-top: 8px; }
 .cc-payment-success { text-align: center; padding: 12px 0; }
 .cc-payment-success .dashicons { color: #008a20; height: 40px; width: 40px; font-size: 40px; }
 .cc-payment-success h3 { font-size: 20px; margin: 12px 0 8px; }

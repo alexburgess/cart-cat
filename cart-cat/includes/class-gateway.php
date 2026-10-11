@@ -5,7 +5,7 @@ defined('ABSPATH') || exit;
 final class Gateway extends \WC_Payment_Gateway {
     public function __construct() {
         $this->id = 'cart_cat_square'; $this->method_title = 'Square — Cart Cat';
-        $this->title = 'Credit or debit card'; $this->description = 'Pay securely with Square.';
+        $this->title = 'Card or Square gift card'; $this->description = 'Pay securely with Square.';
         $this->enabled = 'yes'; $this->has_fields = true; $this->supports = array('products', 'refunds');
         add_action('wp_enqueue_scripts', array($this, 'scripts'));
     }
@@ -37,8 +37,13 @@ final class Gateway extends \WC_Payment_Gateway {
     public function payment_fields() {
         $order = self::current_order(); if (!self::authorized($order) || 'ready' !== $order->get_meta('_cart_cat_preparation')) { return; }
         $state = Payments::status($order->get_id());
-        $checking = !is_wp_error($state) && ($state['status'] ?? '') === 'checking';
-        $config = array('config' => Square::public_config(), 'amount' => $order->get_total(), 'currency' => $order->get_currency(), 'billing' => $order->get_address('billing'), 'channel' => 'customer');
+        $order = wc_get_order($order->get_id());
+        $status = is_wp_error($state) ? 'checking' : $state['status'];
+        if ($status !== 'paid' && $status !== 'checking' && !$order->needs_payment()) { $status = 'unavailable'; }
+        $checking = in_array($status, array('checking', 'paid', 'unavailable'), true);
+        $payment = !is_wp_error($state) ? ($state['payment'] ?? null) : null;
+        $config = array('config' => Square::public_config(), 'amount' => $payment['remaining'] ?? $order->get_total(), 'currency' => $order->get_currency(), 'billing' => $order->get_address('billing'), 'channel' => 'customer', 'payment' => $payment, 'status' => $status);
+        if ($status === 'paid') { $config['completed_url'] = $this->get_return_url($order); }
         include dirname(__DIR__) . '/templates/payment.php';
     }
     public function validate_fields() { return true; }
@@ -46,10 +51,16 @@ final class Gateway extends \WC_Payment_Gateway {
         $order = wc_get_order($order_id);
         $nonce = isset($_POST['woocommerce-pay-nonce']) && is_scalar($_POST['woocommerce-pay-nonce']) ? wp_unslash($_POST['woocommerce-pay-nonce']) : '';
         if (!self::authorized($order) || !wp_verify_nonce($nonce, 'woocommerce-pay')) { wc_add_notice('Please reopen the secure payment link.', 'error'); return array('result' => 'failure'); }
-        $result = Payments::pay((int) $order_id, array('source_type' => 'token', 'token' => isset($_POST['cart_cat_token']) && is_scalar($_POST['cart_cat_token']) ? wp_unslash($_POST['cart_cat_token']) : '', 'verification_token' => isset($_POST['cart_cat_verification_token']) && is_scalar($_POST['cart_cat_verification_token']) ? wp_unslash($_POST['cart_cat_verification_token']) : '', 'version' => isset($_POST['cart_cat_version']) && is_scalar($_POST['cart_cat_version']) ? sanitize_text_field(wp_unslash($_POST['cart_cat_version'])) : ''), 'customer');
+        $field = static function ($name, $default = '') { return isset($_POST[$name]) && is_string($_POST[$name]) ? wp_unslash($_POST[$name]) : $default; };
+        $request = array('source_type' => $field('cart_cat_source_type', 'token'), 'token' => $field('cart_cat_token'), 'verification_token' => $field('cart_cat_verification_token'), 'version' => $field('cart_cat_version'), 'request_id' => $field('cart_cat_request_id'), 'payment_revision' => $field('cart_cat_payment_revision'));
+        // The native pay-for-order capability, exact order key and Woo nonce protect both actions.
+        $result = $field('cart_cat_action') === 'cancel' ? Payments::cancel_split((int) $order_id, $request, 'customer') : Payments::pay((int) $order_id, $request, 'customer');
         if (is_wp_error($result)) { wc_add_notice($result->get_error_message(), 'error'); return array('result' => 'failure'); }
         if ($result['status'] === 'paid') { return array('result' => 'success', 'redirect' => $this->get_return_url($order)); }
-        if ($result['status'] === 'checking') { return array('result' => 'success', 'redirect' => $order->get_checkout_payment_url()); }
+        if ($result['status'] === 'checking' || isset($result['payment'])) {
+            if (!empty($result['message'])) { wc_add_notice($result['message'], 'notice'); }
+            return array('result' => 'success', 'redirect' => $order->get_checkout_payment_url());
+        }
         wc_add_notice($result['message'] ?? 'Square did not complete the payment.', 'error');
         return array('result' => 'failure');
     }

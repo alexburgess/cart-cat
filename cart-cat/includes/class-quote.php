@@ -19,6 +19,9 @@ final class Quote {
 		$visible = array_key_exists( 'order_notes_visible', $input ) ? $input['order_notes_visible'] : false;
 		if ( ! is_bool( $visible ) ) { return self::error( 'order_notes_visible', 'Choose whether the order note is visible to the customer.' ); }
 		$input['order_notes_visible'] = $visible;
+		$order_type = array_key_exists( 'order_type', $input ) ? $input['order_type'] : 'regular';
+		if ( ! in_array( $order_type, array( 'regular', 'somminar' ), true ) ) { return self::error( 'order_type', 'Choose a regular or SOMMinar order.' ); }
+		$input['order_type'] = $order_type;
 		$minutes = Stock_Hold::normalize( array_key_exists( 'hold_minutes', $input ) ? $input['hold_minutes'] : Stock_Hold::config()['default_minutes'] );
 		if ( is_wp_error( $minutes ) ) { return $minutes; }
 		$input['hold_minutes'] = $minutes;
@@ -136,6 +139,7 @@ final class Quote {
 		$square_scope = Square::scope();
 		$quote['automatic_discounts'] = self::format_automatic_discounts( $automatic_discounts, $automatic );
 		$quote['hold_minutes'] = $input['hold_minutes'];
+		$quote['order_type'] = $input['order_type'];
 		$quote['shipping_status'] = ! $needs_shipping ? 'not_required' : ( $shipping_available ? 'available' : 'unavailable' );
 		$quote['hash'] = hash_hmac( 'sha256', wp_json_encode( array( $input, $quote, $customer['woo_id'], $customer['roles'], $customer['square_id'] ?? '', $square_scope ) ), wp_salt( 'auth' ) );
 		$quote['_square_scope'] = $square_scope;
