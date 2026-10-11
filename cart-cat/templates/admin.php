@@ -50,11 +50,11 @@ defined( 'ABSPATH' ) || exit;
 				</section>
 				<section class="cc-card" aria-labelledby="cc-delivery-heading">
 					<div class="cc-section-heading"><h2 id="cc-delivery-heading"><span class="cc-step" aria-hidden="true">3</span><?php esc_html_e( 'Pickup or shipping', 'cart-cat' ); ?></h2></div>
-					<label class="cc-checkbox" for="cc-somminar-order"><input type="checkbox" id="cc-somminar-order" name="somminar_order" /><span><?php esc_html_e( 'Is this a SOMMinar order', 'cart-cat' ); ?></span></label>
 					<div class="cc-fulfillment-options">
 						<label class="cc-choice"><input type="radio" name="cc-fulfillment" value="pickup" checked /><span><strong><?php esc_html_e( 'Pickup at the winery', 'cart-cat' ); ?></strong><small><?php esc_html_e( 'Local pickup · Virginia tax', 'cart-cat' ); ?></small></span></label>
 						<label class="cc-choice"><input type="radio" name="cc-fulfillment" value="shipping" /><span><strong><?php esc_html_e( 'Ship to the customer', 'cart-cat' ); ?></strong><small><?php esc_html_e( 'Store shipping rates and tax', 'cart-cat' ); ?></small></span></label>
 					</div>
+					<label class="cc-checkbox cc-somminar-pill" for="cc-somminar-order"><input type="checkbox" id="cc-somminar-order" name="somminar_order" /><span class="cc-icon cc-icon-graduation-cap fad fa-graduation-cap" aria-hidden="true"></span><span><?php esc_html_e( 'SOMMinar Order', 'cart-cat' ); ?></span></label>
 					<div id="cc-shipping-panel" hidden><div class="cc-subheading"><h3><?php esc_html_e( 'Shipping address', 'cart-cat' ); ?></h3><button id="cc-copy-billing" type="button" class="button-link"><?php esc_html_e( 'Copy billing details', 'cart-cat' ); ?></button></div><p class="cc-help"><?php esc_html_e( 'Enter the recipient’s email and phone, even when shipping to someone other than the purchaser. Payment emails go to the purchaser.', 'cart-cat' ); ?></p><div id="cc-shipping-fields" class="cc-fields"></div>
 						<div class="cc-ups-validation"><button id="cc-validate-ups" type="button" class="button" aria-describedby="cc-ups-help cc-ups-status"><?php esc_html_e( 'Validate with UPS', 'cart-cat' ); ?></button><p id="cc-ups-help" class="cc-help"><?php esc_html_e( 'Optional: check this address with UPS and review any suggested corrections.', 'cart-cat' ); ?></p><div id="cc-ups-status" class="cc-message" role="status" aria-live="polite" hidden></div><div id="cc-ups-candidates"></div></div>
 					</div>

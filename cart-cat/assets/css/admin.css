@@ -183,6 +183,11 @@
 .cc-app .cc-review-notes p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cc-app .cc-checkbox { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0 8px; line-height: 1.5; }
 .cc-app .cc-checkbox input { flex-shrink: 0; margin: 3px 0 0; }
+.cc-app .cc-somminar-pill { display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; padding: 10px 16px; border: 1px solid #c3c4c7; border-radius: 999px; background: #f6f7f7; font-weight: 600; cursor: pointer; }
+.cc-app .cc-somminar-pill input { margin: 0; }
+.cc-app .cc-somminar-pill:has(input:checked) { background: #f0f6fc; border-color: var(--cc-accent); color: #135e96; box-shadow: 0 0 0 1px var(--cc-accent); }
+.cc-app .cc-somminar-pill:has(input:focus-visible) { outline: 2px solid var(--cc-accent); outline-offset: 3px; }
+.cc-app .cc-somminar-pill:has(input:disabled) { cursor: default; }
 .cc-email-setup-dialog .cc-stock-hold { margin: 22px 0 0; }
 .cc-email-setup-dialog #cc-email-recipient-step { margin-top: 22px; }
 .cc-email-setup-dialog .cc-actions { justify-content: flex-end; }

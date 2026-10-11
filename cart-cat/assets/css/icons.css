@@ -24,6 +24,7 @@
 .cc-app .cc-icon-user-plus { --cc-icon: "\f234"; }
 .cc-app .cc-icon-store { --cc-icon: "\f54e"; }
 .cc-app .cc-icon-truck { --cc-icon: "\f0d1"; }
+.cc-app .cc-icon-graduation-cap { --cc-icon: "\f19d"; }
 .cc-app .cc-icon-provider { width: auto; font-family: "Cart Cat Provider Icons"; font-weight: 400; }
 .cc-app .cc-icon-provider::before { position: static; }
 .cc-app .cc-icon-provider::after { content: none; }

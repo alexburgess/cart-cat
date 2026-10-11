@@ -139,8 +139,8 @@ const server = http.createServer(async (req, res) => {
 		assert.equal(new URL(page.url()).origin, origin);
 		await page.getByRole('heading', { name: 'Cart Cat', exact: true }).waitFor();
 		assert.equal(await page.locator('vite-error-overlay, nextjs-portal').count(), 0);
-		assert(!await page.getByRole('checkbox', { name: 'Is this a SOMMinar order', exact: true }).isChecked());
-		await page.getByRole('checkbox', { name: 'Is this a SOMMinar order', exact: true }).check();
+		assert(!await page.getByRole('checkbox', { name: 'SOMMinar Order', exact: true }).isChecked());
+		await page.getByRole('checkbox', { name: 'SOMMinar Order', exact: true }).check();
 		await page.locator('#cc-draft-title').fill('Unfinished gift');
 		await page.locator('[name="cc-fulfillment"][value="shipping"]').check();
 		await page.locator('#cc-shipping-first_name').fill('Gift recipient');
@@ -248,7 +248,7 @@ const server = http.createServer(async (req, res) => {
 		assert.equal(await page.locator('#cc-shipping-email').inputValue(), 'recipient@example.test');
 		noCommerceWrites(); assert.equal(logs.prepares.length, 0);
 		assert.equal(logs.requests.filter((request) => /^orders(?:\/|$)/.test(request.route)).length, 0, 'Unprepared drafts never request order or payment endpoints');
-		await page.getByRole('checkbox', { name: 'Is this a SOMMinar order', exact: true }).check();
+		await page.getByRole('checkbox', { name: 'SOMMinar Order', exact: true }).check();
 		await page.waitForFunction(() => !document.getElementById('cc-create-order').disabled);
 		assert.equal(logs.quotes.at(-1).order_type, 'somminar', 'Changing the type gets a fresh quote');
 		await page.setViewportSize({ width: 390, height: 844 });
