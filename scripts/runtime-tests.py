@@ -20,7 +20,7 @@ probe = "if (!in_array(wp_parse_url(home_url(), PHP_URL_HOST), array('localhost'
 subprocess.run(base + ['eval', probe], check=True)
 if args.log_dir:
     pathlib.Path(args.log_dir).mkdir(parents=True, exist_ok=True)
-suites = ('runtime-quote.php', 'customer-catalog-runtime.php', 'catalog-cache-runtime.php', 'quote-pricing-runtime.php', 'fulfillment-runtime.php', 'order-lifecycle-runtime.php', 'notes-runtime.php', 'square-scope-runtime.php', 'square-itemization-runtime.php', 'square-inventory-runtime.php', 'payment-runtime.php', 'presentation-runtime.php', 'email-runtime.php', 'customer-page-runtime.php')
+suites = ('runtime-quote.php', 'customer-catalog-runtime.php', 'customer-square-link-runtime.php', 'catalog-cache-runtime.php', 'quote-pricing-runtime.php', 'fulfillment-runtime.php', 'order-lifecycle-runtime.php', 'notes-runtime.php', 'square-scope-runtime.php', 'square-itemization-runtime.php', 'square-inventory-runtime.php', 'payment-runtime.php', 'split-payment-runtime.php', 'presentation-runtime.php', 'email-runtime.php', 'customer-page-runtime.php')
 for name in suites:
     command = base + ['eval-file', str(ROOT / 'tests' / name)]
     if name == 'fulfillment-runtime.php' and args.vole_source:

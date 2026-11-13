@@ -1,4 +1,6 @@
-# Cart Cat 0.1.11
+# Cart Cat 0.1.15
+
+Version 0.1.15 uses verified WooCommerce-to-Square customer links for saved cards and preserves the installed membership-authority integration. The customer implementation was compared with Stone Tower production on November 13, 2026. This repository also retains the SOMMinar order option from versions 0.1.13–0.1.14, which is absent from that production installation. See [Testing](docs/testing.md) for validation boundaries.
 
 Version 0.1.11 adds saved drafts, Google address search, optional UPS address validation, and separate shipping-recipient contacts with a scoped Shippo export bridge. The existing Square catalog itemization, taxes, postage, discounts and inventory coordination remain in place; see [Square itemization](docs/square-itemization.md).
 

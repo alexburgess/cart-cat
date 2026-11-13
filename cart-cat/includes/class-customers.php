@@ -53,6 +53,16 @@ final class Customers {
 				$user = get_user_by( 'email', $email );
 				if ( $user instanceof \WP_User && self::user_on_site( $user ) ) {
 					$woo_id = (int) $user->ID;
+					// A stored account link owns this selection. Same-email Square
+					// duplicates must not replace it or masquerade as the account.
+					// Resolve verifies the link afresh when staff select this row.
+					if ( self::square_links( $woo_id ) ) {
+						if ( ! isset( $woo_rows[ $woo_id ] ) ) {
+							$woo_rows[ $woo_id ] = count( $rows );
+							$rows[] = self::summary( $woo_id, '', self::woo_fields( $user ), array( 'woocommerce' ), self::local_roles( $user ) );
+						}
+						continue;
+					}
 				}
 			}
 			$fields = self::square_fields( $record );
@@ -143,9 +153,18 @@ final class Customers {
 			$sources[] = 'woocommerce';
 			$source = self::has_club_roles( $roles ) ? 'wordpress' : 'none';
 		}
-		$square_record = null;
+		$square_record = $user ? self::linked_square_customer( (int) $user->ID ) : null;
+		if ( is_wp_error( $square_record ) ) { return $square_record; }
 		$square_status = 'unlinked';
-		if ( '' !== (string) $identity['square_id'] ) {
+		if ( is_array( $square_record ) ) {
+			if ( '' !== (string) $identity['square_id'] && $identity['square_id'] !== $square_record['id'] ) {
+				$selected = self::square_customer( $identity['square_id'] );
+				if ( is_wp_error( $selected ) ) { return $selected; }
+				if ( $selected['id'] !== $square_record['id'] ) {
+					return self::error( 'customer_square_conflict', 'This selection uses a different Square profile from the customer’s verified account link. Look up and select the customer again.', 409 );
+				}
+			}
+		} elseif ( '' !== (string) $identity['square_id'] ) {
 			$response = Square::request( 'GET', '/v2/customers/' . rawurlencode( $identity['square_id'] ) );
 			if ( is_wp_error( $response ) || ! isset( $response['customer']['id'] ) || (string) $response['customer']['id'] !== $identity['square_id'] ) {
 				return self::error( 'customer_square_unavailable', 'Square could not verify the selected customer. Please retry.', 503 );
@@ -286,6 +305,47 @@ final class Customers {
 		return array( 'ids' => array_slice( array_map( 'strval', (array) $ids ), 0, self::LIMIT ), 'available' => true, 'partial' => count( (array) $ids ) > self::LIMIT || ! $last_sync || $last_sync < time() - 86400 );
 	}
 
+	/** Stored links are identity authority; email is only a fallback for unlinked accounts. */
+	private static function square_links( int $user_id ): array {
+		$links = array();
+		foreach ( array( 'square_customer_id', '_stw_square_role_customer_id_1' ) as $key ) {
+			$id = get_user_meta( $user_id, $key, true );
+			if ( '' !== $id ) { $links[] = $id; }
+		}
+		return $links;
+	}
+
+	/** RetrieveCustomer resolves real merge aliases without an email ownership guess. */
+	private static function square_customer( $id ) {
+		if ( ! is_string( $id ) || ! preg_match( '/^[A-Za-z0-9_-]{1,192}$/D', $id ) ) {
+			return self::error( 'customer_square_link', 'This customer’s stored Square link needs review before using cards on file.', 409 );
+		}
+		$response = Square::request( 'GET', '/v2/customers/' . rawurlencode( $id ) );
+		$record = is_wp_error( $response ) ? null : ( $response['customer'] ?? null );
+		if ( ! is_array( $record ) || ! is_string( $record['id'] ?? null ) || ! preg_match( '/^[A-Za-z0-9_-]{1,192}$/D', $record['id'] ) ) {
+			return self::error( 'customer_square_unavailable', 'Square could not verify this customer’s account link. Please retry.', 503 );
+		}
+		return $record;
+	}
+
+	private static function linked_square_customer( int $user_id ) {
+		$customer = null; $verified = array();
+		foreach ( self::square_links( $user_id ) as $id ) {
+			// Validate before using the value as a cache key (metadata can be malformed).
+			if ( ! is_string( $id ) || ! isset( $verified[ $id ] ) ) {
+				$record = self::square_customer( $id );
+				if ( is_wp_error( $record ) ) { return $record; }
+				$verified[ $id ] = $record;
+			}
+			$record = $verified[ $id ];
+			if ( null !== $customer && $customer['id'] !== $record['id'] ) {
+				return self::error( 'customer_square_conflict', 'This customer has conflicting Square account links. Review the links before using cards on file.', 409 );
+			}
+			$customer = $record;
+		}
+		return $customer;
+	}
+
 	private static function square_exact_email( $email ) {
 		$response = Square::request( 'POST', '/v2/customers/search', array( 'limit' => 3, 'query' => array( 'filter' => array( 'email_address' => array( 'exact' => $email ) ) ) ) );
 		if ( is_wp_error( $response ) || ( isset( $response['customers'] ) && ! is_array( $response['customers'] ) ) ) {
@@ -311,6 +371,8 @@ final class Customers {
 
 	/** Active local club role wins; other server-assigned roles remain available to Addify. */
 	private static function local_roles( $user ) {
+        if ( function_exists( 'pupel_membership_authority_active' ) && pupel_membership_authority_active() ) { return pupel_membership_authority_local_roles( $user ); }
+
 		$club = self::club_roles();
 		$roles = array();
 		foreach ( (array) $user->roles as $role ) {
@@ -329,6 +391,11 @@ final class Customers {
 	}
 
 	private static function square_roles( $record ) {
+        if ( function_exists( 'pupel_membership_authority_active' ) && pupel_membership_authority_active() ) {
+            $authority = pupel_membership_authority_context( $record['email_address'] ?? '' );
+            return is_wp_error( $authority ) ? array() : $authority['roles'];
+        }
+
 		if ( ! class_exists( '\STW_Square_Role_Reconciler' ) || ! method_exists( '\STW_Square_Role_Reconciler', 'status' ) || ! method_exists( '\STW_Square_Role_Reconciler', 'planRoleChanges' ) ) {
 			return array();
 		}
