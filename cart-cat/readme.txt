@@ -3,7 +3,7 @@ Requires at least: 6.5
 Requires PHP: 8.1
 Requires Plugins: woocommerce
 Tested up to: 7.1
-Stable tag: 0.1.15
+Stable tag: 0.1.16
 
 Prepare WooCommerce customer orders with store pricing, fulfillment, tax, and Square payment.
 
@@ -13,6 +13,9 @@ Cart Cat is a staff-only order preparation screen for WooCommerce administrators
 Install the supplied Quantity Crab and SquareWooSync compatibility changes before enabling payments. Use HTTPS and validate in a Square Sandbox staging environment before production release. Full installation and validation notes are included in the delivery bundle.
 
 == Changelog ==
+
+= 0.1.16 =
+Match every customer search word before limiting results and accept verified canonical Square merge responses. Include the SOMMinar Order checkbox pill below pickup and shipping, with its duotone graduation-cap icon.
 = 0.1.15 =
 Use the customer account’s verified Square link for cards on file. Keep duplicate email profiles from replacing linked accounts, verify merge aliases, and require review of conflicting or unavailable links.
 

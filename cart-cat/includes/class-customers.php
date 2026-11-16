@@ -29,7 +29,7 @@ final class Customers {
 		set_transient( $bucket, $count + 1, 90 );
 		$terms = preg_split( '/\s+/u', self::lower( $query ), -1, PREG_SPLIT_NO_EMPTY );
 		$terms = is_array( $terms ) ? array_slice( $terms, 0, 6 ) : array( self::lower( $query ) );
-		$users = self::woo_candidates( $query, $terms );
+		$users = self::woo_candidates( $terms );
 		$square = self::square_candidates( $query, $terms );
 		$rows = array();
 		$woo_rows = array();
@@ -223,26 +223,35 @@ final class Customers {
 		) );
 	}
 
-	private static function woo_candidates( $query, $terms ) {
-		$found = array();
-		$base = array( 'number' => 40, 'blog_id' => get_current_blog_id() );
-		$queries = array( array_merge( $base, array( 'search' => '*' . $query . '*', 'search_columns' => array( 'user_login', 'user_email', 'display_name' ) ) ) );
-		$meta = array( 'relation' => 'OR' );
-		foreach ( $terms as $term ) {
-			foreach ( array( 'first_name', 'last_name', 'billing_email', 'billing_phone' ) as $key ) {
-				$meta[] = array( 'key' => $key, 'value' => $term, 'compare' => 'LIKE' );
-			}
-		}
-		$queries[] = array_merge( $base, array( 'meta_query' => $meta ) );
-		foreach ( $queries as $args ) {
-			foreach ( get_users( $args ) as $user ) {
-				$fields = self::woo_fields( $user );
-				if ( self::matches( $fields, $terms, (string) $user->display_name ) ) {
-					$found[ $user->ID ] = $user;
+	/** Match every word before limiting results; keep WordPress's site-membership scope. */
+	private static function woo_candidates( $terms ) {
+		global $wpdb;
+		$lookup = new \WP_User_Query();
+		$filter = static function ( $user_query ) use ( $lookup, $terms, $wpdb ) {
+			if ( $user_query !== $lookup ) { return; }
+			foreach ( $terms as $term ) {
+				$like = '%' . $wpdb->esc_like( $term ) . '%';
+				$args = array( $like, $like, $like );
+				$phone = '';
+				if ( ctype_digit( $term ) ) {
+					// Preserve digit-only phone matching across spaces and punctuation.
+					$phone = " OR (cc_search.meta_key='billing_phone' AND cc_search.meta_value REGEXP %s)";
+					$args[] = implode( '[^0-9]*', str_split( $term ) );
 				}
+				$user_query->query_where .= $wpdb->prepare(
+					" AND ({$wpdb->users}.display_name LIKE %s OR {$wpdb->users}.user_email LIKE %s OR EXISTS (SELECT 1 FROM {$wpdb->usermeta} cc_search WHERE cc_search.user_id={$wpdb->users}.ID AND cc_search.meta_key IN ('first_name','last_name','billing_first_name','billing_last_name','billing_email','billing_phone') AND (cc_search.meta_value LIKE %s{$phone})))",
+					$args
+				);
 			}
+		};
+		add_action( 'pre_user_query', $filter );
+		try {
+			$lookup->prepare_query( array( 'number' => self::LIMIT, 'blog_id' => get_current_blog_id(), 'count_total' => false ) );
+			$lookup->query();
+			return $lookup->get_results();
+		} finally {
+			remove_action( 'pre_user_query', $filter );
 		}
-		return array_slice( array_values( $found ), 0, self::LIMIT );
 	}
 
 	/** Square supports email/phone search; names use SWS's existing local index. */
@@ -256,9 +265,11 @@ final class Customers {
 				return array( 'customers' => array(), 'status' => 'unavailable' );
 			}
 			foreach ( $response['responses'] as $id => $entry ) {
-				if ( in_array( (string) $id, $mirror['ids'], true ) && isset( $entry['customer']['id'] ) && (string) $entry['customer']['id'] === (string) $id ) {
-					$records[ $id ] = $entry['customer'];
-				}
+				if ( ! in_array( (string) $id, $mirror['ids'], true ) || ! is_array( $entry['customer'] ?? null ) ) { continue; }
+				$record = $entry['customer'];
+				if ( ! is_string( $record['id'] ?? null ) || ! preg_match( '/^[A-Za-z0-9_-]{1,192}$/D', $record['id'] ) ) { continue; }
+				// A requested merge alias can return a different, canonical customer ID.
+				$records[ $record['id'] ] = $record;
 			}
 		}
 		$digits = preg_replace( '/\D/', '', $query );
