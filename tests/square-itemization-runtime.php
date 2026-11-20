@@ -104,6 +104,33 @@ try {
     $calculate_corruption = 'total'; $assert(is_wp_error(Square_Order::prepare($o, $context)), 'CalculateOrder total mismatches fail before an order or payment can be created.');
     $calculate_corruption = 'components'; $assert(is_wp_error(Square_Order::prepare($o, $context)), 'CalculateOrder component mismatches fail even when the grand total matches.'); $calculate_corruption = '';
 
+    $price_product = $product('Catalog-linked price override fixture');
+    $price_product->set_virtual(true); $price_product->set_tax_status('none'); $price_product->save();
+    $price_input = array(
+        'customer' => array('first_name' => 'Price', 'last_name' => 'Fixture', 'email' => 'price-override@example.test'),
+        'lines' => array(
+            array('product_id' => $price_product->get_id(), 'quantity' => 2, 'price_override' => array('type' => 'fixed', 'value' => '12.50')),
+            array('product_id' => $price_product->get_id(), 'quantity' => 1, 'price_override' => array('type' => 'percent', 'value' => '100')),
+        ),
+        'discount' => array('type' => 'percent', 'amount' => 10, 'mode' => 'add'),
+        'fulfillment' => array('type' => 'shipping'),
+    );
+    $previous_actor = get_current_user_id();
+    $staff = get_users(array('role' => 'administrator', 'number' => 1, 'fields' => 'ID'));
+    wp_set_current_user((int) reset($staff));
+    try {
+        $price_quote = $ok(Cart_Cat\Quote::calculate($price_input));
+        $price_order = $ok(Cart_Cat\Orders::create($price_input, $price_quote['hash'], 'square-fixture-' . wp_generate_uuid4()));
+    } finally {
+        wp_set_current_user($previous_actor);
+    }
+    $created_orders[] = $price_order['order_id'];
+    $price_snapshot = $prepare(wc_get_order($price_order['order_id']));
+    $price_lines = $price_snapshot['order']['line_items'];
+    $assert(array($price_product->get_meta('square_variation_id'), $price_product->get_meta('square_variation_id')) === array_column($price_lines, 'catalog_object_id'), 'Adjusted and complimentary lines retain the same linked Square catalog product.');
+    $assert(array(1250, 0) === array_column(array_column($price_lines, 'base_price_money'), 'amount'), 'Square uses the saved custom and complimentary prices.');
+    $assert(2250 === $price_snapshot['expected']['total'] && 250 === $price_snapshot['expected']['discount'], 'Square itemization agrees with the adjusted Woo total and its cart-wide coupon.');
+
     $o = $order(); $line($o, $wine, 1, '10.00', '10.00', array($six => '0.60')); $line($o, $wine, 1, '10.00', '10.00', array($five => '0.50')); $finish($o);
     $snapshot = $prepare($o); $calculated = cc_square_calculate($snapshot['order']);
     $assert($calculated['total_tax_money']['amount'] === 110 && $calculated['total_money']['amount'] === 2110, 'Different tax rates stay attached to their respective line items.');

@@ -26,6 +26,14 @@ final class Quote {
 		if ( is_wp_error( $minutes ) ) { return $minutes; }
 		$input['hold_minutes'] = $minutes;
 		if ( empty( $input['lines'] ) || ! is_array( $input['lines'] ) || count( $input['lines'] ) > 100 ) { return self::error( 'products', 'Add between 1 and 100 product lines.' ); }
+		foreach ( $input['lines'] as &$line ) {
+			if ( ! is_array( $line ) ) { return self::error( 'product', 'Invalid product selection.' ); }
+			$override = self::normalize_price_override( $line['price_override'] ?? null );
+			if ( is_wp_error( $override ) ) { return $override; }
+			if ( null === $override ) { unset( $line['price_override'] ); }
+			else { $line['price_override'] = $override; }
+		}
+		unset( $line );
 		$discount = (array) ( $input['discount'] ?? array() );
 		$amount = $discount['amount'] ?? 0;
 		if ( '' === $amount ) { $amount = 0; }
@@ -40,13 +48,30 @@ final class Quote {
 		if ( is_wp_error( $customer ) ) { return $customer; }
 		return Context::run( $customer, $input, static function ( $cart ) use ( $input, $customer, $callback ) {
 			foreach ( $input['lines'] as $line ) {
-				if ( ! is_array( $line ) ) { return self::error( 'product', 'Invalid product selection.' ); }
 				$result = Catalog::add_to_cart( $cart, $line );
 				if ( is_wp_error( $result ) ) { return $result; }
 			}
 			$quote = self::build( $cart, $customer, $input );
 			return is_wp_error( $quote ) ? $quote : $callback( $quote );
 		} );
+	}
+	/** Prices use the shop's catalog tax convention, just like native WooCommerce prices. */
+	public static function normalize_price_override( $override ) {
+		if ( null === $override ) { return null; }
+		$type = is_array( $override ) ? ( $override['type'] ?? '' ) : '';
+		$value = is_array( $override ) ? ( $override['value'] ?? null ) : null;
+		$decimal = is_string( $value ) && preg_match( '/\A(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)\z/', trim( $value ) );
+		if ( ! in_array( $type, array( 'percent', 'fixed' ), true ) || ! ( is_int( $value ) || is_float( $value ) || $decimal ) ) {
+			return self::error( 'price_override', 'Enter a valid item price or percentage discount.' );
+		}
+		$amount = (float) $value;
+		// Keep the unit price within a range that remains representable when multiplied by Woo cart quantities.
+		$maximum = 'percent' === $type ? 100 : 99999999;
+		if ( ! is_finite( $amount ) || $amount < 0 || $amount > $maximum ) {
+			$message = 'percent' === $type ? 'Enter an item discount between 0% and 100%.' : 'Enter an item price between zero and 99,999,999.';
+			return self::error( 'price_override', $message );
+		}
+		return array( 'type' => $type, 'value' => 'fixed' === $type ? self::money( $amount ) : wc_format_decimal( $amount ) );
 	}
 	private static function build( $cart, array $customer, array $input ) {
 		$notices = array();
@@ -125,18 +150,32 @@ final class Quote {
 		}
 		$hold = self::heat_hold( $input );
 		if ( $hold['required'] && ! in_array( $hold['choice'], array( 'hold', 'ship' ), true ) ) { $notices[] = 'Choose Heat Hold or Ship ASAP before preparing the order.'; }
-		$lines = array(); $catalog_total = 0; $automatic = 0; $automatic_discounts = array();
+		$lines = array(); $catalog_total = 0; $automatic = 0; $has_price_override = false; $automatic_discounts = array();
 		foreach ( $cart->get_cart() as $key => $item ) {
 			$catalog = wc_get_price_excluding_tax( $item['data'], array( 'qty' => $item['quantity'], 'price' => $item['_cart_cat_catalog_unit'] ?? $item['data']->get_price( 'edit' ) ) );
-			$catalog = max( $catalog, $item['line_subtotal'] );
-			$savings = max( 0, $catalog - $item['line_subtotal'] );
+			$before_override = isset( $item['_cart_cat_before_override'] ) ? wc_get_price_excluding_tax( $item['data'], array( 'qty' => $item['quantity'], 'price' => $item['_cart_cat_before_override'] ) ) : $item['line_subtotal'];
+			$catalog = max( $catalog, $before_override );
+			$savings = max( 0, $catalog - $before_override );
 			$catalog_total += $catalog; $automatic += $savings;
 			self::collect_automatic_discounts( $automatic_discounts, $item, $savings );
 			$meta = apply_filters( 'woocommerce_get_item_data', array(), $item );
-			$lines[] = array( 'key' => $key, 'name' => $item['data']->get_name(), 'quantity' => $item['quantity'], 'subtotal' => self::money( $catalog ), 'total' => self::money( $item['line_total'] ), 'tax' => self::money( $item['line_tax'] ), 'automatic_savings' => self::money( $savings ), 'meta' => array_map( static function ( $m ) { return array( 'key' => wp_strip_all_tags( $m['key'] ?? $m['name'] ?? '' ), 'value' => wp_strip_all_tags( $m['display'] ?? $m['value'] ?? '' ) ); }, $meta ) );
+			$line = array( 'key' => $key, 'name' => $item['data']->get_name(), 'quantity' => $item['quantity'], 'subtotal' => self::money( $catalog ), 'total' => self::money( $item['line_total'] ), 'tax' => self::money( $item['line_tax'] ), 'automatic_savings' => self::money( $savings ), 'meta' => array_map( static function ( $m ) { return array( 'key' => wp_strip_all_tags( $m['key'] ?? $m['name'] ?? '' ), 'value' => wp_strip_all_tags( $m['display'] ?? $m['value'] ?? '' ) ); }, $meta ) );
+			if ( isset( $item['_cart_cat_price_override'] ) ) {
+				$has_price_override = true;
+				$baseline = (float) self::money( $before_override );
+				$line['automatic_savings'] = self::money( (float) $line['subtotal'] - $baseline );
+				$line['price_override'] = $item['_cart_cat_price_override'];
+				$line['price_adjustment'] = self::money( (float) self::money( $item['line_subtotal'] ) - $baseline );
+			}
+			$lines[] = $line;
 		}
 		$quote = array( 'currency' => get_woocommerce_currency(), 'decimals' => wc_get_price_decimals(), 'lines' => $lines, 'totals' => array( 'subtotal' => self::money( $catalog_total ), 'automatic_savings' => self::money( $automatic ), 'discount' => self::money( $cart->get_discount_total() ), 'shipping' => self::money( $cart->get_shipping_total() ), 'fees' => self::money( $cart->get_fee_total() ), 'tax' => self::money( $cart->get_total_tax() ), 'total' => self::money( $cart->get_total( 'edit' ) ) ), 'rates' => $rates, 'heat_hold' => $hold, 'customer' => array( 'name' => trim( ( $customer['first_name'] ?? '' ) . ' ' . ( $customer['last_name'] ?? '' ) ), 'roles' => $customer['roles'], 'sources' => $customer['sources'] ?? array() ), 'can_submit' => ! $notices, 'notices' => array_values( array_unique( $notices ) ) );
 		$square_scope = Square::scope();
+		if ( $has_price_override ) {
+			// Reconcile the displayed components to Woo's subtotal, including its line rounding.
+			$subtotal = (float) $quote['totals']['subtotal'] - (float) $quote['totals']['automatic_savings'];
+			$quote['totals']['price_adjustment'] = self::money( (float) self::money( $cart->get_subtotal() ) - $subtotal );
+		}
 		$quote['automatic_discounts'] = self::format_automatic_discounts( $automatic_discounts, $automatic );
 		$quote['hold_minutes'] = $input['hold_minutes'];
 		$quote['order_type'] = $input['order_type'];

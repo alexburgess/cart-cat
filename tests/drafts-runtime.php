@@ -6,7 +6,7 @@ use Cart_Cat\Customers;
 use Cart_Cat\Orders;
 use Cart_Cat\Quote;
 
-$count = 0; $drafts = array(); $users = array(); $orders = array(); $product = null; $zone = null;
+$count = 0; $drafts = array(); $users = array(); $orders = array(); $product = null; $gift = null; $zone = null;
 $old_actor = get_current_user_id(); $suffix = substr( wp_generate_uuid4(), 0, 8 );
 $old_tax = get_option( 'woocommerce_calc_taxes', false );
 $assert = static function ( $value, $message ) use ( &$count ) { ++$count; if ( ! $value ) { throw new RuntimeException( $message ); } };
@@ -68,13 +68,17 @@ try {
 	$address = array( 'first_name' => 'Native', 'last_name' => 'Recipient', 'email' => 'native-recipient@example.test', 'phone' => '2025550111', 'address_1' => '123 Fixture Lane', 'address_2' => '', 'city' => 'Leesburg', 'state' => 'VA', 'country' => 'US', 'postcode' => '20175' );
 	$full = array( 'customer' => array( 'reference' => '', 'first_name' => 'Native', 'last_name' => 'Buyer', 'email' => 'native-buyer@example.test', 'phone' => '2025550100', 'billing' => $address, 'shipping' => $address ), 'lines' => array( array( 'product_id' => $product->get_id(), 'variation_id' => 0, 'quantity' => 2, 'attributes' => array(), 'addons' => array() ) ), 'discount' => array( 'type' => 'percent', 'amount' => 0, 'mode' => 'add' ), 'fulfillment' => array( 'type' => 'shipping', 'rates' => array( 'flat_rate:' . $instance ), 'heat_hold_choice' => '' ), 'hold_minutes' => 60, 'order_notes' => '', 'order_notes_visible' => false );
 	$full['order_type'] = 'somminar';
+	$full['lines'][0]['price_override'] = array( 'type' => 'fixed', 'value' => '12.75' );
 	$prepared_draft = $ok( Drafts::save( 0, array( 'input' => $full, 'request_id' => 'native-ready-' . wp_generate_uuid4() ) ) ); $drafts[] = $prepared_draft['draft_id'];
 	$assert( 0 === $new_orders && 10 === wc_get_product( $product->get_id() )->get_stock_quantity(), 'Saving a complete draft still creates no order or stock deduction.' );
+	$loaded_price = $ok( Drafts::get( $prepared_draft['draft_id'] ) )['input']['lines'][0]['price_override'] ?? array();
+	$assert( 'fixed' === ( $loaded_price['type'] ?? '' ) && 12.75 === (float) ( $loaded_price['value'] ?? '' ), 'Reloading a saved draft restores its custom unit price.' );
 	$quote = $ok( Quote::calculate( $full ) ); $assert( $quote['can_submit'], 'Native current Woo shipping quote can prepare.' );
 	$prepare_request = array( 'input' => $full, 'version' => $prepared_draft['version'], 'quote_hash' => $quote['hash'], 'request_id' => 'native-prepare-' . wp_generate_uuid4() );
 	$result = $ok( Drafts::prepare( $prepared_draft['draft_id'], $prepare_request ) ); $orders[] = $result['order_id'];
 	$assert( 1 === $new_orders && 'pending' === $result['status'], 'Only explicit preparation creates one pending Woo order.' );
 	$saved_order = wc_get_order( $result['order_id'] );
+	$assert( 30.50 === (float) $saved_order->get_total() && 12.75 === (float) ( $result['input']['lines'][0]['price_override']['value'] ?? '' ), 'Draft preparation applies the saved per-unit price and preserves it on the order.' );
 	$assert( 'somminar' === $ok( Drafts::get( $prepared_draft['draft_id'] ) )['input']['order_type'] && 'somminar' === $saved_order->get_meta( '_pupel_order_type' ) && 'somminar' === $result['input']['order_type'], 'SOMMinar type survives native draft storage, preparation, and actual Woo metadata.' );
 	$assert( '2025550111' === $saved_order->get_shipping_phone() && 'native-recipient@example.test' === $saved_order->get_meta( '_shipping_email' ), 'Actual Woo storage preserves recipient phone and email.' );
 	$assert( '2025550100' === $saved_order->get_billing_phone() && 'native-buyer@example.test' === $saved_order->get_billing_email(), 'Recipient contact remains independent of the purchaser billing contact.' );
@@ -93,12 +97,21 @@ try {
 	$recover = $ok( Drafts::get( $prepared_draft['draft_id'] ) );
 	$assert( 'prepared' === $recover['state'] && $result['order_id'] === $recover['order_id'] && 1 === $new_orders, 'A lost final draft write recovers from the actual order ledger without duplicating.' );
 	delete_option( $request_key );
+
+	$gift = new WC_Product_Simple(); $gift->set_name( 'Gift membership fixture' ); $gift->set_slug( 'gift-membership' ); $gift->set_status( 'publish' ); $gift->set_regular_price( '75' ); $gift->save();
+	$gift_lines = array_fill( 0, 2, array( 'product_id' => $gift->get_id(), 'quantity' => 1, 'quantity_per_line' => 999 ) );
+	$gift_lines[0]['price_override'] = array( 'type' => 'percent', 'value' => '20' );
+	$gift_draft = $ok( Drafts::save( 0, array( 'input' => array( 'lines' => $gift_lines ), 'request_id' => 'native-gifts-' . wp_generate_uuid4() ) ) );
+	$drafts[] = $gift_draft['draft_id'];
+	$gift_reload = $ok( Drafts::get( $gift_draft['draft_id'] ) );
+	$assert( array( 1, 1 ) === array_column( $gift_reload['input']['lines'], 'quantity_per_line' ), 'Reopened gift lines retain their authoritative single-unit constraint when manual pricing is reset.' );
 	echo 'Cart Cat drafts native runtime: ' . $count . ' assertions passed; Woo ' . WC_VERSION . '; ' . WC_Data_Store::load( 'order' )->get_current_class_name() . ".\n";
 } finally {
 	remove_filter( 'cart_cat_square_public_config', $config, PHP_INT_MAX ); remove_filter( 'cart_cat_square_public_config', $scope_change, PHP_INT_MAX ); remove_filter( 'cart_cat_square_transport', $network, PHP_INT_MAX ); remove_action( 'woocommerce_new_order', $order_event, PHP_INT_MAX );
 	foreach ( $orders as $id ) { $order = wc_get_order( $id ); if ( $order ) { wc_release_stock_for_order( $order ); wp_clear_scheduled_hook( 'cart_cat_expire_order', array( $id ) ); $order->delete( true ); } }
 	foreach ( $drafts as $id ) { wp_delete_post( $id, true ); }
 	if ( $product ) { $product->delete( true ); }
+	if ( $gift ) { $gift->delete( true ); }
 	if ( $zone ) { foreach ( $zone->get_shipping_methods() as $method ) { delete_option( 'woocommerce_' . $method->id . '_' . $method->instance_id . '_settings' ); } $zone->delete(); WC_Cache_Helper::get_transient_version( 'shipping', true ); }
 	if ( false === $old_tax ) { delete_option( 'woocommerce_calc_taxes' ); } else { update_option( 'woocommerce_calc_taxes', $old_tax ); }
 	wp_set_current_user( $old_actor ); require_once ABSPATH . 'wp-admin/includes/user.php'; foreach ( $users as $id ) { wp_delete_user( $id ); }

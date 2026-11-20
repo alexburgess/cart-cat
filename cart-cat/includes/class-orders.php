@@ -327,7 +327,7 @@ final class Orders {
 		$input = array_intersect_key( $quote['_input'], array_flip( array( 'customer', 'lines', 'discount', 'fulfillment', 'hold_minutes', 'order_notes', 'order_notes_visible', 'order_type' ) ) );
 		$input['customer'] = array_intersect_key( $quote['_customer'], array_flip( array( 'first_name', 'last_name', 'email', 'phone', 'billing', 'shipping' ) ) );
 		$input['lines'] = array_map( static function ( $line ) {
-			$stored = wc_clean( array_intersect_key( $line, array_flip( array( 'product_id', 'variation_id', 'quantity', 'attributes' ) ) ) );
+			$stored = wc_clean( array_intersect_key( $line, array_flip( array( 'product_id', 'variation_id', 'quantity', 'attributes', 'price_override' ) ) ) );
 			$stored['addons'] = array(); $config = Catalog::configuration( (int) $line['product_id'] );
 			foreach ( is_wp_error( $config ) ? array() : $config['addons'] as $addon ) {
 				if ( ! array_key_exists( $addon['key'], $line['addons'] ?? array() ) ) { continue; }
@@ -419,7 +419,8 @@ final class Orders {
 	private static function role_discount_names( array $quote ) {
 		$names = array();
 		foreach ( $quote['_cart']->get_cart() as $line ) {
-			if ( (float) $line['data']->get_price() >= (float) ( $line['_cart_cat_catalog_unit'] ?? 0 ) ) { continue; }
+			$automatic_price = (float) ( $line['_cart_cat_before_override'] ?? $line['data']->get_price() );
+			if ( $automatic_price >= (float) ( $line['_cart_cat_catalog_unit'] ?? 0 ) ) { continue; }
 			if ( ! empty( $line['_quantity_crab_discount']['applied'] ) && (float) ( $line['_cart_cat_role_addon_savings_unit'] ?? 0 ) <= 0 ) { continue; }
 			$names = array_merge( $names, (array) ( $line['_cart_cat_role_discount_names'] ?? array() ) );
 		}
@@ -452,6 +453,10 @@ final class Orders {
 		if ( $names ) { $note .= ' Role discount was applied (' . implode( ', ', $names ) . ').'; }
 		$case_names = self::case_discount_names( $quote );
 		if ( $case_names ) { $note .= ' Case discount was applied (' . implode( ', ', $case_names ) . ').'; }
+		$manual_lines = count( array_filter( $quote['lines'], static function ( $line ) { return isset( $line['price_override'] ); } ) );
+		if ( $manual_lines ) {
+			$note .= ' ' . sprintf( _n( 'Manual pricing was set on %d product line.', 'Manual pricing was set on %d product lines.', $manual_lines, 'cart-cat' ), $manual_lines );
+		}
 		$discount = $quote['_input']['discount'];
 		if ( (float) $discount['amount'] > 0 ) {
 			$amount = 'percent' === $discount['type'] ? wc_format_decimal( $discount['amount'] ) . '%' : html_entity_decode( wp_strip_all_tags( wc_price( $discount['amount'], array( 'currency' => $quote['currency'] ) ) ), ENT_QUOTES );

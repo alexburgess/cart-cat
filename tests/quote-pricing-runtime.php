@@ -146,6 +146,16 @@ try {
 	$assert( '99.00' === $percent['lines'][0]['total'], 'Percentage add-on uses the effective role product price.' );
 	list( $percent_case ) = $quote( 'ten', 12, null, $addons );
 	$assert( '1068.00' === $percent_case['lines'][0]['total'] && array( array( 'kind' => 'role', 'label' => $club_name, 'amount' => '12.00' ), array( 'kind' => 'quantity', 'label' => 'Test Case', 'amount' => '240.00' ) ) === $percent_case['automatic_discounts'], 'Case pricing preserves the discounted percentage add-on and assigns its remaining role saving separately.' );
+	$override_input = $base_input;
+	$override_input['customer']['reference'] = $refs['ten'];
+	$override_input['lines'][0]['quantity'] = 12;
+	$override_input['lines'][0]['addons'] = $addons;
+	$override_input['lines'][0]['price_override'] = array( 'type' => 'percent', 'value' => 10 );
+	$override_quote = $ok( Cart_Cat\Quote::calculate( $override_input ) );
+	$assert( '972.00' === $override_quote['lines'][0]['total'] && '-96.00' === $override_quote['lines'][0]['price_adjustment'] && $override_quote['automatic_discounts'] === $percent_case['automatic_discounts'], 'Percentage adjusts the winning case merchandise price and preserves the separately priced add-on and named automatic savings.' );
+	$override_input['lines'][0]['price_override'] = array( 'type' => 'fixed', 'value' => 0 );
+	$free_product_quote = $ok( Cart_Cat\Quote::calculate( $override_input ) );
+	$assert( '108.00' === $free_product_quote['lines'][0]['total'] && '-960.00' === $free_product_quote['lines'][0]['price_adjustment'], 'A zero custom merchandise price keeps the separately priced add-on.' );
 	delete_post_meta( $product->get_id(), '_product_addons' );
 	$product->set_sale_price( '80' ); $product->save();
 	list( $sale_case ) = $quote( 'ten', 12 );

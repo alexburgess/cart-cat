@@ -64,6 +64,8 @@
 .cc-line:last-child { border-bottom: 0; padding-bottom: 2px; }
 .cc-line-name { font-weight: 600; display: block; margin-bottom: 4px; overflow-wrap: anywhere; }
 .cc-line-meta { display: block; color: #646970; font-size: 12px; overflow-wrap: anywhere; }
+.cc-line-price-adjustment:empty { display: none; }
+.cc-app .cc-line-edit-price { min-height: 36px; padding: 0 6px; margin-left: -6px; text-align: left; }
 .cc-line-price { text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; }
 .cc-line input[type=number] { width: 100%; }
 .cc-remove { display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: #b32d2e; cursor: pointer; width: 28px; height: 36px; border-radius: 4px; }
@@ -173,6 +175,8 @@
 .cc-email-dialog p, .cc-email-result p { line-height: 1.7; overflow-wrap: anywhere; }
 .cc-email-pending { color: #646970; }
 .cc-email-dialog .cc-actions { margin-top: 22px; }
+.cc-item-price-product { color: #50575e; font-weight: 600; margin: 8px 0 18px; }
+.cc-item-price-dialog .cc-actions .button { min-height: 36px; }
 @media (max-width: 600px) { .cc-header-actions { gap: 8px; } .cc-header-actions .cc-badge { max-width: 160px; white-space: normal; text-align: right; } .cc-email-dialog { padding: 24px; } }
 
 .cc-app .cc-disclosure-button { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 12px; border-radius: 4px; font-weight: 500; }

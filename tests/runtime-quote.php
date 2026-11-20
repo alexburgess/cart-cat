@@ -95,5 +95,77 @@ try {
 	cc_assert( $mixed['totals']['tax'] === $mixed_order->get_total_tax() && $mixed['totals']['total'] === $mixed_order->get_total(), 'Mixed-class saved order tax and total equal the approved quote.' );
 	$mixed_order->delete( true );
 	WC_Tax::_update_tax_rate( $standard_rate, array( 'tax_rate' => '6.0000' ) ); WC_Cache_Helper::invalidate_cache_group( 'taxes' );
+
+	$adjusted = $input;
+	$adjusted['discount'] = array( 'type' => 'percent', 'amount' => 10, 'mode' => 'add' );
+	$adjusted['lines'] = array(
+		array( 'product_id' => $product->get_id(), 'quantity' => 2, 'price_override' => array( 'type' => 'percent', 'value' => '25.50' ) ),
+		array( 'product_id' => $product->get_id(), 'quantity' => 1 ),
+		array( 'product_id' => $merch->get_id(), 'quantity' => 2, 'price_override' => array( 'type' => 'fixed', 'value' => '12.35' ) ),
+	);
+	$adjusted_quote = cc_ok( Quote::calculate( $adjusted ) );
+	cc_assert( $adjusted_quote['can_submit'] && count( $adjusted_quote['lines'] ) === 3, 'The same wine on an adjusted line and a standard line stays separate.' );
+	cc_assert( array( '134.10', '90.00', '22.23' ) === array_column( $adjusted_quote['lines'], 'total' ), 'Per-item percent and custom unit prices respect quantity, then the cart-wide percentage applies once.' );
+	cc_assert( '-126.30' === $adjusted_quote['totals']['price_adjustment'] && '27.37' === $adjusted_quote['totals']['discount'] && '14.78' === $adjusted_quote['totals']['tax'] && '261.11' === $adjusted_quote['totals']['total'], 'Adjusted merchandise, the cart coupon and tax reconcile to the grand total.' );
+	cc_assert( $adjusted_quote['hash'] === cc_ok( Quote::calculate( $adjusted, true ) )['hash'], 'Requoting does not compound the adjustment.' );
+	$changed_override = $adjusted;
+	$changed_override['lines'][0]['price_override']['value'] = 20;
+	$stale = Orders::create( $changed_override, $adjusted_quote['hash'], 'fixture-' . wp_generate_uuid4() );
+	cc_assert( is_wp_error( $stale ) && 'cart_cat_stale_quote' === $stale->get_error_code(), 'The approved quote binds manual line pricing.' );
+	foreach ( array( array(), true, array( 'type' => 'fixed', 'value' => '' ), array( 'type' => 'fixed', 'value' => -1 ), array( 'type' => 'fixed', 'value' => '1e100' ), array( 'type' => 'percent', 'value' => '100.01' ), array( 'type' => 'invalid', 'value' => 5 ) ) as $invalid_override ) {
+		$malformed = $adjusted;
+		$malformed['lines'][0]['price_override'] = $invalid_override;
+		cc_assert( is_wp_error( Quote::calculate( $malformed ) ), 'Invalid overrides are rejected before checkout.' );
+	}
+	$changed_override['lines'][0]['price_override']['value'] = 100;
+	$changed_override['lines'][2]['price_override']['value'] = 0;
+	cc_assert( array( '0.00', '90.00', '0.00' ) === array_column( cc_ok( Quote::calculate( $changed_override ) )['lines'], 'total' ), 'Both 100% and an explicit zero price are valid.' );
+	$changed_override['lines'][2]['price_override']['value'] = '55';
+	$raised = cc_ok( Quote::calculate( $changed_override ) );
+	cc_assert( '99.00' === $raised['lines'][2]['total'] && '10.00' === $raised['lines'][2]['price_adjustment'], 'A custom price may increase the unit price.' );
+
+	$fractional = $adjusted;
+	$fractional['discount']['amount'] = 0;
+	$fractional['lines'] = array_fill( 0, 2, array( 'product_id' => $product->get_id(), 'quantity' => 1, 'price_override' => array( 'type' => 'percent', 'value' => '0.006' ) ) );
+	$fractional_quote = cc_ok( Quote::calculate( $fractional ) );
+	cc_assert( array( '99.99', '99.99' ) === array_column( $fractional_quote['lines'], 'total' ) && '-0.02' === $fractional_quote['totals']['price_adjustment'], 'The cart summary reflects Woo rounding fractional cents per line.' );
+
+	$prepared = cc_ok( Orders::create( $adjusted, $adjusted_quote['hash'], 'fixture-' . wp_generate_uuid4() ) );
+	$adjusted_order = wc_get_order( $prepared['order_id'] );
+	try {
+		$items = array_values( $adjusted_order->get_items() );
+		cc_assert( array( 149.0, 100.0, 24.70 ) === array_map( static function ( $item ) { return (float) $item->get_subtotal(); }, $items ), 'Woo persists adjusted subtotals before the normal cart discount.' );
+		cc_assert( $adjusted_quote['totals']['total'] === $adjusted_order->get_total() && $adjusted_quote['totals']['tax'] === $adjusted_order->get_total_tax(), 'Prepared total and taxes equal the approved quote.' );
+		$displayed = Cart_Cat\Presentation::customer_pricing( $adjusted_order );
+		$first_displayed_item = $displayed['lines'][ $items[0]->get_id() ];
+		cc_assert( 200.0 === (float) $first_displayed_item['original'] && 134.10 === (float) $first_displayed_item['total'], 'Customer presentation recognizes the saved pre-adjustment and final prices.' );
+		$editing = cc_ok( Orders::edit( $adjusted_order->get_id(), $prepared['version'] ) );
+		$editable = $editing['input'];
+		cc_assert( 'percent' === $editable['lines'][0]['price_override']['type'] && 25.5 === (float) $editable['lines'][0]['price_override']['value'] && 'fixed' === $editable['lines'][2]['price_override']['type'], 'Reopening the order restores the saved overrides.' );
+		$editable['lines'][0]['price_override'] = null;
+		$reset_quote = cc_ok( Quote::calculate( $editable ) );
+		$reset_order = cc_ok( Orders::prepare( $adjusted_order->get_id(), $editable, $reset_quote['hash'], $editing['version'], 'fixture-' . wp_generate_uuid4() ) );
+		$reopened = cc_ok( Orders::get( $adjusted_order->get_id() ) );
+		cc_assert( count( $reset_quote['lines'] ) === 2 && '270.00' === $reset_quote['lines'][0]['total'] && $adjusted_order->get_id() === $reset_order['order_id'] && empty( $reopened['input']['lines'][0]['price_override'] ), 'Reset restores normal pricing and requotes the same order.' );
+	} finally {
+		$adjusted_order->delete( true );
+	}
+
+	// A tax-inclusive catalog price follows Woo's base-to-pickup tax conversion.
+	WC_Tax::_insert_tax_rate( array( 'tax_rate_country' => 'US', 'tax_rate_state' => 'CA', 'tax_rate' => '5.0000', 'tax_rate_name' => 'Fixture base wine tax', 'tax_rate_priority' => 1, 'tax_rate_compound' => 0, 'tax_rate_shipping' => 0, 'tax_rate_order' => 0, 'tax_rate_class' => 'wine-rates' ) );
+	WC_Cache_Helper::invalidate_cache_group( 'taxes' );
+	update_option( 'woocommerce_default_country', 'US:CA' );
+	update_option( 'woocommerce_prices_include_tax', 'yes' );
+	try {
+		$inclusive = $adjusted;
+		$inclusive['lines'] = array( array( 'product_id' => $product->get_id(), 'quantity' => 1, 'price_override' => array( 'type' => 'fixed', 'value' => '84' ) ) );
+		$inclusive['discount']['amount'] = 0;
+		$inclusive_quote = cc_ok( Quote::calculate( $inclusive ) );
+		cc_assert( '80.00' === $inclusive_quote['lines'][0]['total'] && '4.80' === $inclusive_quote['totals']['tax'] && '84.80' === $inclusive_quote['totals']['total'], 'The custom catalog price removes base tax before adding the pickup rate.' );
+		cc_assert( '95.24' === $inclusive_quote['totals']['subtotal'] && '-15.24' === $inclusive_quote['totals']['price_adjustment'], 'The adjustment reconciles before tax even when the pickup rate differs from the base rate.' );
+	} finally {
+		update_option( 'woocommerce_prices_include_tax', 'no' );
+		update_option( 'woocommerce_default_country', 'US:VA' );
+	}
 } finally { foreach ( $ids as $id ) { $p = wc_get_product( $id ); if ( $p ) { $p->delete( true ); } } }
 echo 'Cart Cat quote/order runtime: ' . $GLOBALS['cc_assert_count'] . " assertions passed.\n";

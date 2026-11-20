@@ -307,11 +307,17 @@ final class Catalog {
 				return self::notice_error( 'Product validation failed. Check its options.' );
 			}
 			$data = self::is_gift( $product ) ? array( '_cart_cat_gift_line' => count( $before ) ) : array();
+			$override = $line['price_override'] ?? null;
+			if ( null !== $override && ! $selected->is_sold_individually() ) {
+				// Adjusted rows keep their own quantity, including two overrides at the same price.
+				$data['_cart_cat_price_line'] = count( $before );
+			}
 			$key = $cart->add_to_cart( $product_id, $quantity, $variation_id, $attributes, $data );
 			if ( ! $key ) {
 				$cart->set_cart_contents( $before );
 				return self::notice_error( 'This product could not be added. Check stock and options.' );
 			}
+			if ( null !== $override ) { $cart->cart_contents[ $key ]['_cart_cat_price_override'] = $override; }
 			return $key;
 		} catch ( \Throwable $error ) {
 			$cart->set_cart_contents( $before );
@@ -424,7 +430,7 @@ final class Catalog {
 		}
 		return array();
 	}
-	private static function is_gift( $product ) { return 'gift-membership' === $product->get_slug(); }
+	public static function is_gift( $product ) { return 'gift-membership' === $product->get_slug(); }
 	private static function notice_error( $fallback ) {
 		$notices = function_exists( 'wc_get_notices' ) ? wc_get_notices( 'error' ) : array();
 		$notice = end( $notices );

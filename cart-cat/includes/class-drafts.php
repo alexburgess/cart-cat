@@ -57,6 +57,11 @@ final class Drafts {
 		foreach ( $raw['lines'] ?? array() as $line ) {
 			if ( ! is_array( $line ) ) { return self::error( 'draft_input', 'A draft product line is invalid.', 422 ); }
 			$row = array( 'product_id' => max( 0, (int) ( $line['product_id'] ?? 0 ) ), 'variation_id' => max( 0, (int) ( $line['variation_id'] ?? 0 ) ), 'quantity' => self::text( $line['quantity'] ?? '', 30 ), 'attributes' => array(), 'addons' => array(), 'name' => self::text( $line['name'] ?? '', 250 ), 'meta' => array() );
+			if ( isset( $line['price_override'] ) ) {
+				$override = Quote::normalize_price_override( $line['price_override'] );
+				if ( is_wp_error( $override ) ) { return $override; }
+				$row['price_override'] = $override;
+			}
 			foreach ( array( 'attributes', 'addons' ) as $kind ) {
 				$values = $line[ $kind ] ?? array();
 				if ( ! is_array( $values ) || count( $values ) > 100 ) { return self::error( 'draft_input', 'A draft product has too many options.', 422 ); }
@@ -93,6 +98,19 @@ final class Drafts {
 	private static function detail( $post, array $data ): array {
 		$result = self::summary( $post, $data );
 		$result['input'] = $data['input'];
+		if ( function_exists( 'wc_get_product' ) ) {
+			$products = array();
+			foreach ( $result['input']['lines'] as &$line ) {
+				$id = (int) $line['product_id'];
+				if ( ! $id ) { continue; }
+				$product = $products[ $id ] ??= wc_get_product( $id );
+				if ( $product && $product->is_type( 'variation' ) ) { $product = wc_get_product( $product->get_parent_id() ); }
+				if ( ! $product ) { continue; }
+				$line['sold_individually'] = $product->is_sold_individually();
+				$line['quantity_per_line'] = Catalog::is_gift( $product ) ? 1 : null;
+			}
+			unset( $line );
+		}
 		$reference = Customers::reference_for_draft( $data['identity'] );
 		$result['input']['customer']['reference'] = is_wp_error( $reference ) ? 'draft-customer-selection-required' : $reference;
 		$result['customer_selection_required'] = is_wp_error( $reference );

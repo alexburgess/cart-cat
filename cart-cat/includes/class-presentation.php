@@ -56,40 +56,64 @@ final class Presentation {
 		$tax_display = $tax_display ?: get_option( 'woocommerce_tax_display_cart', 'excl' );
 		$inclusive = 'incl' === $tax_display;
 		$review = self::matching_review( $order );
+		$catalog_taxes = array(); $automatic_taxes = array();
 		// Older orders may lack historical rate percentages. Keep native prices if tax is unprovable.
 		if ( $inclusive && $review ) {
 			foreach ( array_values( $order->get_items() ) as $index => $item ) {
-				$original = (float) $review['lines'][ $index ]['subtotal'];
-				if ( $original > (float) $item->get_subtotal() && null === self::original_tax( $order, $item, $original ) ) { $review = array(); break; }
+				list( $catalog, $automatic ) = self::review_subtotals( $item, $review['lines'][ $index ] );
+				$catalog_taxes[ $index ] = self::review_tax( $order, $item, $catalog );
+				$automatic_taxes[ $index ] = $catalog === $automatic ? $catalog_taxes[ $index ] : self::review_tax( $order, $item, $automatic );
+				if ( null === $catalog_taxes[ $index ] || null === $automatic_taxes[ $index ] ) { $review = array(); break; }
 			}
 		}
-		$lines = array(); $original_subtotal = 0.0; $prepared_subtotal = 0.0; $original_tax = 0.0; $prepared_tax = 0.0; $index = 0;
+		$lines = array(); $index = 0;
+		$subtotals = array_fill_keys( array( 'catalog', 'automatic', 'prepared' ), 0.0 );
+		$tax_totals = $subtotals;
 		$round_at_subtotal = 'yes' === get_option( 'woocommerce_tax_round_at_subtotal' );
 		foreach ( $order->get_items() as $item_id => $item ) {
 			$subtotal = (float) $item->get_subtotal();
-			$original = $review ? max( $subtotal, (float) $review['lines'][ $index ]['subtotal'] ) : $subtotal;
+			list( $catalog, $automatic ) = self::review_subtotals( $item, $review['lines'][ $index ] ?? array() );
 			$tax = (float) $item->get_subtotal_tax();
-			$catalog_tax = $original > $subtotal ? self::original_tax( $order, $item, $original ) : $tax;
-			$original_subtotal += $original; $prepared_subtotal += $subtotal;
-			$original_tax += $round_at_subtotal ? (float) $catalog_tax : wc_round_tax_total( (float) $catalog_tax );
-			$prepared_tax += $round_at_subtotal ? $tax : wc_round_tax_total( $tax );
-			$before = $original + ( $inclusive ? (float) $catalog_tax : 0 );
+			$catalog_tax = $review ? ( $catalog_taxes[ $index ] ?? $tax ) : $tax;
+			$automatic_tax = $review ? ( $automatic_taxes[ $index ] ?? $tax ) : $tax;
+			$subtotals['catalog'] += $catalog; $subtotals['automatic'] += $automatic; $subtotals['prepared'] += $subtotal;
+			foreach ( array( 'catalog' => $catalog_tax, 'automatic' => $automatic_tax, 'prepared' => $tax ) as $key => $amount ) {
+				$tax_totals[ $key ] += $round_at_subtotal ? $amount : wc_round_tax_total( $amount );
+			}
+			$before = $catalog + ( $inclusive ? $catalog_tax : 0 );
 			$after = (float) $item->get_total() + ( $inclusive ? (float) $item->get_total_tax() : 0 );
 			$lines[ $item_id ] = array( 'original' => $before, 'total' => $after, 'discounted' => self::money( $before ) > self::money( $after ), 'original_html' => wc_price( $before, array( 'currency' => $order->get_currency() ) ), 'total_html' => wc_price( $after, array( 'currency' => $order->get_currency() ) ) );
 			++$index;
 		}
-		$display_original = self::money( $original_subtotal + ( $inclusive ? wc_round_tax_total( $original_tax ) : 0 ) );
-		$display_prepared = self::money( $prepared_subtotal + ( $inclusive ? wc_round_tax_total( $prepared_tax ) : 0 ) );
-		$automatic = $display_original - $display_prepared;
-		$totals = null === $native_totals ? $order->get_order_item_totals( $tax_display ) : $native_totals;
-		if ( self::money( $automatic ) > 0 && isset( $totals['cart_subtotal'] ) ) {
-			$totals['cart_subtotal']['value'] = wc_price( $display_original, array( 'currency' => $order->get_currency() ) );
-			if ( ! $inclusive && $order->get_prices_include_tax() && wc_tax_enabled() ) { $totals['cart_subtotal']['value'] .= ' <small class="tax_label">' . WC()->countries->ex_tax_or_vat() . '</small>'; }
-			$discount = array( 'type' => 'discount', 'label' => self::automatic_label( $order, $review ) . ':', 'value' => '&minus;' . wc_price( $automatic, array( 'currency' => $order->get_currency() ) ) );
-			$totals = array_slice( $totals, 0, 1, true ) + array( 'cart_cat_automatic_discount' => $discount ) + array_slice( $totals, 1, null, true );
+		foreach ( $subtotals as $key => $subtotal ) {
+			$subtotals[ $key ] = self::money( $subtotal + ( $inclusive ? wc_round_tax_total( $tax_totals[ $key ] ) : 0 ) );
 		}
-		if ( isset( $totals['discount'] ) && self::money( $automatic ) > 0 ) { $totals['discount']['label'] = 'Additional discount:'; }
+		$automatic = self::money( $subtotals['catalog'] - $subtotals['automatic'] );
+		$adjustment = self::money( $subtotals['prepared'] - $subtotals['automatic'] );
+		$totals = null === $native_totals ? $order->get_order_item_totals( $tax_display ) : $native_totals;
+		$rows = array();
+		if ( $automatic > 0 ) {
+			$rows['cart_cat_automatic_discount'] = array( 'type' => 'discount', 'label' => self::automatic_label( $order, $review ) . ':', 'value' => '&minus;' . wc_price( $automatic, array( 'currency' => $order->get_currency() ) ) );
+		}
+		if ( 0.0 !== $adjustment ) {
+			$rows['cart_cat_price_adjustment'] = array( 'type' => 'price_adjustment', 'label' => 'Item price adjustment:', 'value' => ( $adjustment < 0 ? '&minus;' : '+' ) . wc_price( abs( $adjustment ), array( 'currency' => $order->get_currency() ) ) );
+		}
+		if ( $rows && isset( $totals['cart_subtotal'] ) ) {
+			$totals['cart_subtotal']['value'] = wc_price( $subtotals['catalog'], array( 'currency' => $order->get_currency() ) );
+			if ( ! $inclusive && $order->get_prices_include_tax() && wc_tax_enabled() ) { $totals['cart_subtotal']['value'] .= ' <small class="tax_label">' . WC()->countries->ex_tax_or_vat() . '</small>'; }
+			$totals = array_slice( $totals, 0, 1, true ) + $rows + array_slice( $totals, 1, null, true );
+		}
+		if ( isset( $totals['discount'] ) && ( $automatic > 0 || $adjustment < 0 ) ) { $totals['discount']['label'] = 'Additional discount:'; }
 		return array( 'lines' => $lines, 'totals' => $totals );
+	}
+	private static function review_subtotals( $item, array $line ): array {
+		$prepared = (float) $item->get_subtotal();
+		$catalog = (float) ( $line['subtotal'] ?? $prepared );
+		if ( isset( $line['price_adjustment'] ) ) { return array( $catalog, $catalog - (float) $line['automatic_savings'] ); }
+		return array( max( $catalog, $prepared ), $prepared );
+	}
+	private static function review_tax( $order, $item, float $subtotal ) {
+		return $subtotal === (float) $item->get_subtotal() ? (float) $item->get_subtotal_tax() : self::original_tax( $order, $item, $subtotal );
 	}
 	/** An inactive nested email masks the outer invoice until its own rendering finishes. */
 	public static function invoice_begin( $order, $sent_to_admin, $plain_text, $email ): void {
@@ -122,7 +146,10 @@ final class Presentation {
 		foreach ( $items as $index => $item ) {
 			$line = $review['lines'][ $index ] ?? array();
 			foreach ( array( 'subtotal', 'total', 'tax', 'automatic_savings', 'quantity' ) as $key ) { if ( ! isset( $line[ $key ] ) || ! is_numeric( $line[ $key ] ) || ! is_finite( (float) $line[ $key ] ) || (float) $line[ $key ] < 0 ) { return array(); } }
-			if ( (string) ( $line['name'] ?? '' ) !== $item->get_name() || (float) $line['quantity'] !== (float) $item->get_quantity() || self::money( $line['total'] ) !== self::money( $item->get_total() ) || self::money( $line['tax'] ) !== self::money( $item->get_total_tax() ) || abs( (float) $line['subtotal'] - (float) $line['automatic_savings'] - (float) $item->get_subtotal() ) > 0.011 ) { return array(); }
+			$adjustment = $line['price_adjustment'] ?? 0;
+			if ( ! is_numeric( $adjustment ) || ! is_finite( (float) $adjustment ) ) { return array(); }
+			$subtotal = (float) $line['subtotal'] - (float) $line['automatic_savings'] + (float) $adjustment;
+			if ( (string) ( $line['name'] ?? '' ) !== $item->get_name() || (float) $line['quantity'] !== (float) $item->get_quantity() || self::money( $line['total'] ) !== self::money( $item->get_total() ) || self::money( $line['tax'] ) !== self::money( $item->get_total_tax() ) || abs( $subtotal - (float) $item->get_subtotal() ) > 1.1 * 10 ** -wc_get_price_decimals() ) { return array(); }
 		}
 		return $review;
 	}

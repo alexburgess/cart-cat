@@ -86,6 +86,18 @@ defined( 'ABSPATH' ) || exit;
 			<p class="cc-footnote"><?php esc_html_e( 'Prices, discounts, shipping and tax are calculated by your WooCommerce store.', 'cart-cat' ); ?></p>
 		</aside>
 	</div>
+	<dialog id="cc-item-price-dialog" class="cc-email-dialog cc-item-price-dialog" aria-labelledby="cc-item-price-heading" aria-describedby="cc-item-price-product">
+		<h2 id="cc-item-price-heading"><?php esc_html_e( 'Edit item price', 'cart-cat' ); ?></h2>
+		<p id="cc-item-price-product" class="cc-item-price-product"></p>
+		<form method="dialog" id="cc-item-price-form">
+			<div class="cc-fields">
+				<label class="cc-field" for="cc-item-price-type"><span><?php esc_html_e( 'Price adjustment', 'cart-cat' ); ?></span><select id="cc-item-price-type"><option value="percent"><?php esc_html_e( 'Percentage discount', 'cart-cat' ); ?></option><option value="fixed"><?php esc_html_e( 'Set unit price', 'cart-cat' ); ?></option></select></label>
+				<label class="cc-field" for="cc-item-price-value"><span id="cc-item-price-label"><?php esc_html_e( 'Discount (%)', 'cart-cat' ); ?></span><input id="cc-item-price-value" type="number" min="0" max="100" step="any" inputmode="decimal" autocomplete="off" data-1p-ignore="true" required aria-describedby="cc-item-price-help" /></label>
+			</div>
+			<p class="cc-help" id="cc-item-price-help"></p>
+			<div class="cc-actions"><button type="submit" class="button button-primary"><?php esc_html_e( 'Apply', 'cart-cat' ); ?></button><button type="button" class="button" id="cc-item-price-reset"><?php esc_html_e( 'Reset price', 'cart-cat' ); ?></button><button type="button" class="button" id="cc-item-price-cancel"><?php esc_html_e( 'Cancel', 'cart-cat' ); ?></button></div>
+		</form>
+	</dialog>
 	<dialog id="cc-drafts-dialog" class="cc-email-dialog cc-drafts-dialog" aria-labelledby="cc-drafts-heading">
 		<button type="button" id="cc-close-drafts" class="cc-dialog-close" aria-label="<?php esc_attr_e( 'Close saved drafts', 'cart-cat' ); ?>">×</button>
 		<h2 id="cc-drafts-heading" tabindex="-1"><?php esc_html_e( 'Saved drafts', 'cart-cat' ); ?></h2>

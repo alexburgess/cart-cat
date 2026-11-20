@@ -10,16 +10,17 @@
 		paymentChecking: false, paymentController: null, paymentMounting: false, paymentPoll: null,
 		draft: null, draftBusy: false, draftError: false, pendingDraft: null, savedDraftFingerprint: '', draftPage: 1, draftPages: 1, navigating: false,
 		upsValidation: { generation: 0, busy: false, snapshot: '', notice: '', tone: '' },
-		cards: [], configProduct: null, quoteTimer: null, searchTimers: {}, requests: {},
+		cards: [], configProduct: null, priceEditor: null, quoteTimer: null, searchTimers: {}, requests: {},
 	};
 	const catalog = typeof window.CartCatCatalog?.create === 'function' ? window.CartCatCatalog.create(api) : null;
 	const holdDefault = Number.isInteger(Number(config.hold?.default_minutes)) && Number(config.hold.default_minutes) > 0 ? Number(config.hold.default_minutes) : 60;
 	const holdSteps = [...new Set([...(config.hold?.steps || []), holdDefault].map(Number).filter((minutes) => Number.isInteger(minutes) && minutes > 0))].sort((a, b) => a - b);
-	const money = (value, currency) => {
+	const money = (value, currency, decimals) => {
 		const number = Number(value);
 		if (!Number.isFinite(number)) return '—';
-		try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || state.quote?.currency || state.order?.currency || config.square?.currency || 'USD' }).format(number); }
-		catch (_) { return number.toFixed(2); }
+		const precision = Number.isInteger(decimals) && decimals >= 0 && decimals <= 20 ? decimals : undefined;
+		try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || state.quote?.currency || state.order?.currency || config.currency || config.square?.currency || 'USD', minimumFractionDigits: precision, maximumFractionDigits: precision }).format(number); }
+		catch (_) { return number.toFixed(precision ?? 2); }
 	};
 	function el(tag, attrs, content) {
 		const node = document.createElement(tag);
@@ -474,7 +475,7 @@
 			order_type: $('cc-somminar-order').checked ? 'somminar' : 'regular',
 			order_notes: $('cc-order-notes').value,
 			order_notes_visible: $('cc-order-notes-visible').checked,
-			lines: state.lines.map((line) => ({ product_id: line.product_id, variation_id: line.variation_id || 0, quantity: line.quantity, addons: line.addons || {}, attributes: line.attributes || {} })),
+			lines: state.lines.map((line) => ({ product_id: line.product_id, variation_id: line.variation_id || 0, quantity: line.quantity, addons: line.addons || {}, attributes: line.attributes || {}, ...(line.price_override ? { price_override: line.price_override } : {}) })),
 			discount: { type: $('cc-discount-type').value, amount: $('cc-discount-amount').value || '0', mode: root.querySelector('[name="cc-discount-mode"]:checked').value },
 			fulfillment: { type: root.querySelector('[name="cc-fulfillment"]:checked').value, rates, heat_hold_choice: root.querySelector('[name="cc-heat-choice"]:checked')?.value || '' },
 		};
@@ -575,12 +576,17 @@
 	function renderQuote(quote) {
 		const totals = quote.totals || {};
 		const shippingUnavailable = quote.shipping_status === 'unavailable' || (quote.shipping_status !== 'not_required' && getInput().fulfillment.type === 'shipping' && (quote.rates || []).some((pkg) => !pkg.rates?.length));
-		const rows = [['Subtotal', totals.subtotal], ...automaticDiscountRows(quote), ['Discount', totals.discount, 'saving'], ['Shipping', totals.shipping], ['Fees', totals.fees, 'optional'], ['Tax', totals.tax], ['Total', totals.total, 'total']];
+		const rows = [['Subtotal', totals.subtotal], ...automaticDiscountRows(quote), ['Item price adjustments', totals.price_adjustment, 'adjustment'], ['Discount', totals.discount, 'saving'], ['Shipping', totals.shipping], ['Fees', totals.fees, 'optional'], ['Tax', totals.tax], ['Total', totals.total, 'total']];
 		$('cc-totals').replaceChildren();
 		rows.forEach(([label, value, kind]) => {
-			if ((kind === 'saving' || kind === 'optional') && !Number(value)) return;
-			const row = el('div', { class: kind ? `cc-${kind}` : '', 'data-total-label': label });
-			const display = shippingUnavailable && label === 'Shipping' ? 'Not available' : shippingUnavailable && label === 'Total' ? 'Pending shipping' : `${kind === 'saving' && Number(value) > 0 ? '−' : ''}${money(value, quote.currency)}`;
+			const amount = Number(value);
+			if (['saving', 'optional', 'adjustment'].includes(kind) && !amount) return;
+			const row = el('div', { class: kind === 'saving' || (kind === 'adjustment' && amount < 0) ? 'cc-saving' : kind ? `cc-${kind}` : '', 'data-total-label': label });
+			let display = money(value, quote.currency, quote.decimals);
+			if (kind === 'adjustment') display = `${amount < 0 ? '−' : '+'}${money(Math.abs(amount), quote.currency, quote.decimals)}`;
+			if (kind === 'saving' && amount > 0) display = `−${display}`;
+			if (shippingUnavailable && label === 'Shipping') display = 'Not available';
+			if (shippingUnavailable && label === 'Total') display = 'Pending shipping';
 			row.append(el('dt', {}, label), el('dd', {}, display));
 			$('cc-totals').append(row);
 		});
@@ -591,7 +597,7 @@
 		if ($('cc-lines').querySelectorAll('.cc-line').length !== state.lines.length) renderLines();
 		$('cc-lines').querySelectorAll('.cc-line').forEach((row, index) => {
 			const line = quote.lines?.[index];
-			renderLinePrice(row.querySelector('.cc-line-price'), line, quote.currency);
+			renderLinePrice(row.querySelector('.cc-line-price'), line, quote.currency, quote.decimals);
 		});
 		$('cc-rates').replaceChildren();
 		(quote.rates || []).forEach((pkg, index) => {
@@ -623,15 +629,77 @@
 			$('cc-heat-hold').append(box);
 		}
 	}
-	function renderLinePrice(container, line, currency) {
+	function renderLinePrice(container, line, currency, decimals) {
 		container.replaceChildren();
 		if (!line) { container.textContent = '—'; return; }
 		const discounted = Number(line.subtotal) > Number(line.total);
-		if (discounted) {
-			container.append(el('span', { class: 'cc-screen-reader' }, 'Original price: '), el('del', { class: 'cc-line-original' }, money(line.subtotal, currency)));
-			container.append(el('span', { class: 'cc-line-discount-label' }, 'Discounted price'));
+		if (discounted || (line.price_override && Number(line.subtotal) < Number(line.total))) {
+			container.append(el('span', { class: 'cc-screen-reader' }, 'Original price: '), el('del', { class: 'cc-line-original' }, money(line.subtotal, currency, decimals)));
+			container.append(el('span', { class: 'cc-line-discount-label' }, discounted ? 'Discounted price' : 'Adjusted price'));
 		}
-		container.append(el('span', { class: discounted ? 'cc-line-discounted' : '' }, money(line.total, currency)));
+		container.append(el('span', { class: discounted ? 'cc-line-discounted' : '' }, money(line.total, currency, decimals)));
+	}
+	function itemPriceText(override, currency, decimals) {
+		if (!override) return '';
+		if (override.type === 'fixed') return `Unit price set to ${money(override.value, currency, decimals)}`;
+		return `${override.value}% item discount`;
+	}
+	function matchingCatalogLine(candidate) {
+		if (candidate.quantity_per_line || candidate.sold_individually) return undefined;
+		const selections = (options) => JSON.stringify(Object.entries(options || {}).sort());
+		const addons = selections(candidate.addons);
+		const attributes = selections(candidate.attributes);
+		return state.lines.find((line) => line !== candidate && !line.price_override && !line.quantity_per_line && !line.sold_individually && line.product_id === candidate.product_id && (line.variation_id || 0) === (candidate.variation_id || 0) && selections(line.addons) === addons && selections(line.attributes) === attributes);
+	}
+	function syncItemPriceFields() {
+		const price = $('cc-item-price-value');
+		const percent = $('cc-item-price-type').value === 'percent';
+		const { currency, decimals } = state.priceEditor;
+		$('cc-item-price-label').textContent = percent ? 'Discount (%)' : `Unit price (${currency})`;
+		$('cc-item-price-help').textContent = percent ? 'The discount applies to the current product price after automatic discounts. Paid add-ons and cart discounts are calculated separately.' : 'Paid add-ons and cart discounts are calculated separately.';
+		price.step = percent ? 'any' : String(10 ** -decimals);
+		price.max = percent ? '100' : '99999999';
+	}
+	function openItemPrice(line) {
+		if (state.order || $('cc-builder').disabled) return;
+		state.priceEditor = {
+			line,
+			currency: state.quote?.currency || state.editingOrder?.currency || config.currency || config.square?.currency || 'USD',
+			decimals: state.quote?.decimals ?? state.editingOrder?.review?.decimals ?? config.decimals ?? 2,
+		};
+		$('cc-item-price-product').textContent = line.name;
+		$('cc-item-price-type').value = line.price_override?.type || 'percent';
+		$('cc-item-price-value').value = line.price_override?.value ?? '';
+		$('cc-item-price-value').setCustomValidity('');
+		$('cc-item-price-reset').hidden = !line.price_override;
+		syncItemPriceFields();
+		$('cc-item-price-dialog').showModal();
+		$('cc-item-price-type').focus();
+	}
+	function closeItemPrice(line = state.priceEditor?.line) {
+		$('cc-item-price-dialog').close();
+		state.priceEditor = null;
+		$('cc-lines').children[state.lines.indexOf(line)]?.querySelector('.cc-line-edit-price').focus();
+	}
+	function applyItemPrice(override) {
+		const editor = state.priceEditor;
+		if (!editor || state.order || $('cc-builder').disabled || !state.lines.includes(editor.line)) return;
+		const { line, currency, decimals } = editor;
+		if (override && line.price_override?.type === override.type && Number(line.price_override.value) === Number(override.value)) { closeItemPrice(); return; }
+		if (override) line.price_override = override;
+		else delete line.price_override;
+		const match = !override && matchingCatalogLine(line);
+		if (match) {
+			match.quantity = Number(match.quantity) + Number(line.quantity);
+			state.lines.splice(state.lines.indexOf(line), 1);
+			renderLines();
+		} else {
+			const row = $('cc-lines').children[state.lines.indexOf(line)];
+			row.querySelector('.cc-line-price-adjustment').textContent = itemPriceText(override, currency, decimals);
+			renderLinePrice(row.querySelector('.cc-line-price'));
+		}
+		closeItemPrice(match || line);
+		changed();
 	}
 	function renderLines(quoted) {
 		$('cc-lines').replaceChildren();
@@ -650,6 +718,10 @@
 			name.append(el('span', { class: 'cc-line-name' }, quote?.name || line.name));
 			const meta = quote?.meta || line.meta || [];
 			meta.forEach((value) => name.append(el('span', { class: 'cc-line-meta' }, typeof value === 'string' ? value : `${value.name || value.key || value.label || ''}: ${value.value || value.display || ''}`)));
+			const priceEdit = button('Edit price', () => openItemPrice(line), 'button-link cc-line-edit-price');
+			priceEdit.setAttribute('aria-label', `Edit price for ${line.name}`);
+			priceEdit.setAttribute('aria-haspopup', 'dialog');
+			name.append(el('span', { class: 'cc-line-meta cc-line-price-adjustment' }, itemPriceText(line.price_override, undefined, config.decimals)), priceEdit);
 			const quantityLabel = el('label', { class: 'cc-field' });
 			quantityLabel.append(el('span', { class: 'cc-screen-reader' }, `Quantity for ${line.name}`));
 			const quantity = el('input', { type: 'number', min: '1', max: line.quantity_per_line || '9999', step: '1', value: line.quantity, inputmode: 'numeric', disabled: Boolean(line.sold_individually || line.quantity_per_line === 1) });
@@ -855,7 +927,7 @@
 				if (variation) meta.unshift(variation.selectedOptions[0].textContent);
 				if (details.sold_individually && state.lines.some((line) => line.product_id === details.id)) { error.textContent = 'This product is sold individually and is already in the order.'; return; }
 				const newLine = { product_id: details.id, variation_id: Number(variation?.value || 0), quantity: 1, addons, attributes: selectedAttributes, name: details.name, meta, sold_individually: details.sold_individually, quantity_per_line: details.quantity_per_line };
-				const same = !details.quantity_per_line && state.lines.find((line) => line.product_id === newLine.product_id && line.variation_id === newLine.variation_id && JSON.stringify(line.addons) === JSON.stringify(newLine.addons) && JSON.stringify(line.attributes) === JSON.stringify(newLine.attributes));
+				const same = matchingCatalogLine(newLine);
 				if (same) same.quantity++;
 				else state.lines.push(newLine);
 				box.hidden = true; box.replaceChildren();
@@ -1034,8 +1106,10 @@
 			const label = el('div');
 			label.append(el('strong', {}, `${line.quantity} × ${line.name}`));
 			(line.meta || []).forEach((value) => label.append(el('span', { class: 'cc-line-meta' }, typeof value === 'string' ? value : `${value.name || value.key || value.label || ''}: ${value.value || value.display || ''}`)));
+			const adjustment = itemPriceText(line.price_override, order.currency, review?.decimals ?? config.decimals);
+			if (adjustment) label.append(el('span', { class: 'cc-line-meta cc-line-price-adjustment' }, adjustment));
 			const price = el('span', { class: 'cc-line-price' });
-			renderLinePrice(price, line, order.currency);
+			renderLinePrice(price, line, order.currency, review?.decimals);
 			row.append(label, price); products.append(row);
 		});
 		const fulfillment = el('div', { class: 'cc-review-section cc-review-fulfillment' });
@@ -1527,6 +1601,22 @@
 	});
 	$('cc-copy-billing').addEventListener('click', () => { renderAddress('shipping', { ...addressValues('billing'), first_name: $('cc-customer-first_name').value, last_name: $('cc-customer-last_name').value, email: $('cc-customer-email').value, phone: $('cc-customer-phone').value }); changed(); });
 	$('cc-validate-ups').addEventListener('click', validateUPSAddress);
+	$('cc-item-price-type').addEventListener('change', syncItemPriceFields);
+	$('cc-item-price-value').addEventListener('input', (event) => event.target.setCustomValidity(''));
+	$('cc-item-price-form').addEventListener('submit', (event) => {
+		event.preventDefault();
+		const price = $('cc-item-price-value');
+		const value = price.valueAsNumber === 0 ? '0' : price.value;
+		if (!/^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$/.test(value)) {
+			price.setCustomValidity('Enter a decimal number.');
+			price.reportValidity();
+			return;
+		}
+		applyItemPrice({ type: $('cc-item-price-type').value, value });
+	});
+	$('cc-item-price-reset').addEventListener('click', () => applyItemPrice(null));
+	$('cc-item-price-cancel').addEventListener('click', () => closeItemPrice());
+	$('cc-item-price-dialog').addEventListener('cancel', (event) => { event.preventDefault(); closeItemPrice(); });
 	$('cc-builder').addEventListener('change', (event) => {
 		if (event.target.closest('#cc-product-config, .cc-address-search') || event.target.matches('#cc-customer-search, #cc-product-search')) return;
 		if (event.target.name === 'cc-fulfillment') {

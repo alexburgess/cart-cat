@@ -57,6 +57,7 @@ final class Context {
 			}, PHP_INT_MAX );
 			// Pricing is reconstructed each pass; Quantity Crab then applies its normal tiers.
 			add_action( 'woocommerce_before_calculate_totals', array( self::class, 'price_lines' ), 1001 );
+			add_action( 'woocommerce_before_calculate_totals', array( self::class, 'apply_price_overrides' ), PHP_INT_MAX );
 			return $callback( $woo->cart, $customer );
 		} catch ( \Throwable $error ) {
 			return new \WP_Error( 'cart_cat_calculation_failed', 'The order could not be calculated. Check the selected products and try again.', array( 'status' => 422 ) );
@@ -107,7 +108,23 @@ final class Context {
 			// Quantity Crab preserves the upstream modifier price when its case
 			// tier wins. Any role savings on a percentage add-on still belong to Addify.
 			$line['_cart_cat_role_addon_savings_unit'] = max( 0.0, $addon_base - $addon_price );
+			if ( isset( $line['_cart_cat_price_override'] ) ) { $line['_cart_cat_addon_unit'] = $addon_price; }
 			$line['data']->set_price( $price + $addon_price );
+		}
+		unset( $line );
+	}
+	public static function apply_price_overrides( $cart ): void {
+		if ( ! self::$active || $cart !== WC()->cart ) { return; }
+		foreach ( $cart->cart_contents as &$line ) {
+			$override = $line['_cart_cat_price_override'] ?? null;
+			if ( null === $override ) { continue; }
+			$before = (float) $line['data']->get_price( 'edit' );
+			$addons = $line['_cart_cat_addon_unit'];
+			$value = (float) $override['value'];
+			// Use the role/case merchandise price as a percentage baseline and retain the add-ons.
+			$price = 'percent' === $override['type'] ? max( 0, $before - $addons ) * ( 1 - $value / 100 ) : $value;
+			$line['_cart_cat_before_override'] = $before;
+			$line['data']->set_price( max( 0, $price + $addons ) );
 		}
 		unset( $line );
 	}

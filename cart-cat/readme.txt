@@ -8,7 +8,7 @@ Stable tag: 0.1.16
 Prepare WooCommerce customer orders with store pricing, fulfillment, tax, and Square payment.
 
 == Description ==
-Cart Cat is a staff-only order preparation screen for WooCommerce administrators and shop managers. It supports customer lookup from Woo and Square, non-ticket products and required add-ons, role/case pricing, one manual product discount, winery pickup, eligible shipping, invoices, and Square card payment.
+Cart Cat is a staff-only order preparation screen for WooCommerce administrators and shop managers. It supports customer lookup from Woo and Square, non-ticket products and required add-ons, role and case pricing, per-item percentage discounts and custom unit prices, a cart-wide discount, winery pickup, eligible shipping, invoices, and Square card payment.
 
 Install the supplied Quantity Crab and SquareWooSync compatibility changes before enabling payments. Use HTTPS and validate in a Square Sandbox staging environment before production release. Full installation and validation notes are included in the delivery bundle.
 

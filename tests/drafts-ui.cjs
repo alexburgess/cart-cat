@@ -29,6 +29,12 @@ function draftDetail(draft) {
 	const detail = copy(draft);
 	// Production reissues a session-bound customer reference on every save/load response.
 	if (detail.input.customer.reference) detail.input.customer.reference = `refreshed-customer-reference-${++referenceSequence}`;
+	// PHP stores draft quantities as text and returns empty add-on and attribute maps as arrays.
+	for (const line of detail.input.lines || []) {
+		line.quantity = String(line.quantity);
+		if (!Object.keys(line.addons || {}).length) line.addons = [];
+		if (!Object.keys(line.attributes || {}).length) line.attributes = [];
+	}
 	return detail;
 }
 drafts.set(10, draftRecord(10, 'Cabernet dinner', fullInput()));
@@ -38,10 +44,18 @@ for (const id of [20, 21, 22]) drafts.set(id, draftRecord(id, `Pagination basket
 const initialDraftCount = drafts.size;
 function quote(input) {
 	const subtotal = input.lines.reduce((sum, line) => sum + price * line.quantity, 0);
+	let adjustment = 0;
+	const lines = input.lines.map((line) => {
+		const override = line.price_override;
+		const unit = !override ? price : override.type === 'fixed' ? Number(override.value) : price * (1 - Number(override.value) / 100);
+		const change = (unit - price) * line.quantity;
+		adjustment += change;
+		return { key: String(line.product_id), name: product.name, quantity: line.quantity, subtotal: String(price * line.quantity), total: String(unit * line.quantity), meta: [], ...(override ? { price_override: override, price_adjustment: String(change) } : {}) };
+	});
 	const shipping = input.fulfillment.type === 'shipping';
 	const cost = shipping ? 15 : 0;
-	const tax = subtotal * .06;
-	return { hash: Buffer.from(JSON.stringify({ input, price })).toString('base64'), currency: 'USD', decimals: 2, automatic_discounts: [], lines: input.lines.map((line) => ({ key: String(line.product_id), name: product.name, quantity: line.quantity, subtotal: String(price * line.quantity), total: String(price * line.quantity), meta: [] })), totals: { subtotal: String(subtotal), automatic_savings: '0', discount: '0', shipping: String(cost), fees: '0', tax: String(tax), total: String(subtotal + cost + tax) }, rates: [{ package_index: 0, rates: [{ id: shipping ? 'flat_rate:1' : 'local_pickup:2', label: shipping ? 'UPS Ground' : 'Winery pickup', cost: String(cost), selected: true }] }], heat_hold: { required: false, choices: [], choice: '' }, customer: { name: [input.customer.first_name, input.customer.last_name].filter(Boolean).join(' '), roles: [], sources: [] }, shipping_status: 'available', can_submit: input.lines.length > 0 && (!shipping || Boolean(input.customer.shipping.address_1 && input.customer.shipping.email && input.customer.shipping.phone)), notices: [] };
+	const tax = (subtotal + adjustment) * .06;
+	return { hash: Buffer.from(JSON.stringify({ input, price })).toString('base64'), currency: 'USD', decimals: 2, automatic_discounts: [], lines, totals: { subtotal: String(subtotal), automatic_savings: '0', price_adjustment: String(adjustment), discount: '0', shipping: String(cost), fees: '0', tax: String(tax), total: String(subtotal + adjustment + cost + tax) }, rates: [{ package_index: 0, rates: [{ id: shipping ? 'flat_rate:1' : 'local_pickup:2', label: shipping ? 'UPS Ground' : 'Winery pickup', cost: String(cost), selected: true }] }], heat_hold: { required: false, choices: [], choice: '' }, customer: { name: [input.customer.first_name, input.customer.last_name].filter(Boolean).join(' '), roles: [], sources: [] }, shipping_status: 'available', can_submit: input.lines.length > 0 && (!shipping || Boolean(input.customer.shipping.address_1 && input.customer.shipping.email && input.customer.shipping.phone)), notices: [] };
 }
 function order(origin, draft) {
 	return { order_id: 700, number: '700', status: 'pending', payment_status: 'unpaid', preparation: 'ready', can_edit: true, input: copy(draft.input), review: quote(draft.input), customer: draft.customer, hold: { minutes: 60, expires_at: Math.floor(Date.now() / 1000) + 3600, expires_label: 'September 18, 2026, 3:00 PM EDT', active: true }, total: quote(draft.input).totals.total, currency: 'USD', billing: copy(draft.input.customer.billing), payment_url: `${origin}/order-pay/700`, edit_url: `${origin}/wp-admin/post.php?post=700&action=edit`, version: 'order-700-v1', payment_email: { uncertain: false, accepted: false }, paid: false };
@@ -248,6 +262,58 @@ const server = http.createServer(async (req, res) => {
 		assert.equal(await page.locator('#cc-shipping-email').inputValue(), 'recipient@example.test');
 		noCommerceWrites(); assert.equal(logs.prepares.length, 0);
 		assert.equal(logs.requests.filter((request) => /^orders(?:\/|$)/.test(request.route)).length, 0, 'Unprepared drafts never request order or payment endpoints');
+		const editPrice = page.getByRole('button', { name: 'Edit price for Estate Cabernet' });
+		const priceDialog = page.getByRole('dialog', { name: 'Edit item price' });
+		const adjustmentType = priceDialog.getByLabel('Price adjustment');
+		const waitForTotal = (expected) => page.waitForFunction((total) => document.getElementById('cc-totals').textContent.includes(total) && !document.getElementById('cc-create-order').disabled, expected);
+		await editPrice.click();
+		await adjustmentType.selectOption('percent');
+		await priceDialog.getByLabel('Discount (%)').fill('101');
+		await priceDialog.getByRole('button', { name: 'Apply', exact: true }).click();
+		assert(await priceDialog.isVisible(), 'A percentage above 100 is rejected before submission');
+		await priceDialog.getByLabel('Discount (%)').fill('20');
+		await priceDialog.getByRole('button', { name: 'Apply', exact: true }).click();
+		assert(await editPrice.evaluate((button) => button === document.activeElement), 'Applying restores focus to the item price button');
+		await waitForTotal('93.28');
+		assert.equal(logs.quotes.at(-1).lines[0].price_override.type, 'percent');
+		assert.equal(Number(logs.quotes.at(-1).lines[0].price_override.value), 20);
+		assert.match(await page.locator('#cc-totals').innerText(), /22\.00/, 'The item adjustment is listed in the totals');
+		await page.screenshot({ path: path.join(evidence, 'item-price-desktop.png') });
+		await page.setViewportSize({ width: 390, height: 844 });
+		await editPrice.click();
+		assert.equal(await priceDialog.getByLabel('Discount (%)').inputValue(), '20');
+		await adjustmentType.selectOption('fixed');
+		await priceDialog.getByLabel('Unit price (USD)').fill('17.25');
+		assert(await priceDialog.evaluate((dialog) => { const rect = dialog.getBoundingClientRect(); return rect.left >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight; }), 'The item price dialog fits a narrow viewport');
+		await page.screenshot({ path: path.join(evidence, 'item-price-mobile.png') });
+		await priceDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+		assert(await editPrice.evaluate((button) => button === document.activeElement), 'Canceling restores focus without applying changes');
+		await waitForTotal('93.28');
+		await page.setViewportSize({ width: 1440, height: 1000 });
+		await page.locator('#cc-product-search').fill('Estate Cabernet');
+		await page.locator('#cc-product-results').getByRole('button', { name: /Estate Cabernet/ }).click();
+		await waitForTotal('151.58');
+		assert.equal(await editPrice.count(), 2, 'Adding the same product at catalog price leaves the adjusted row separate');
+		assert(!logs.quotes.at(-1).lines[1].price_override, 'New units do not inherit the existing override');
+		await page.locator('#cc-save-draft').click(); await waitCount(logs.updates, 4); await idleSave();
+		await page.reload();
+		await waitForTotal('151.58');
+		assert.deepEqual(logs.quotes.at(-1).lines.map((line) => line.quantity), ['2', '1'], 'Both quantities restore from the saved draft as strings');
+		await editPrice.first().click();
+		await priceDialog.getByRole('button', { name: 'Reset price', exact: true }).click();
+		await waitForTotal('174.90');
+		assert(await editPrice.evaluate((button) => button === document.activeElement), 'Reset focuses the remaining row after it merges');
+		assert.equal(logs.quotes.at(-1).lines.length, 1, 'Reset combines otherwise identical catalog rows');
+		assert.equal(logs.quotes.at(-1).lines[0].quantity, 3, 'Reset adds the restored quantities numerically');
+		await page.getByRole('spinbutton', { name: 'Quantity for Estate Cabernet' }).fill('2');
+		await waitForTotal('116.60');
+		assert(!logs.quotes.at(-1).lines[0].price_override, 'Reset removes the item override from the quote input');
+		await editPrice.click();
+		await adjustmentType.selectOption('fixed');
+		await priceDialog.getByLabel('Unit price (USD)').fill('17.25');
+		await priceDialog.getByRole('button', { name: 'Apply', exact: true }).click();
+		await waitForTotal('36.57');
+		await page.setViewportSize({ width: 1440, height: 1000 });
 		await page.getByRole('checkbox', { name: 'SOMMinar Order', exact: true }).check();
 		await page.waitForFunction(() => !document.getElementById('cc-create-order').disabled);
 		assert.equal(logs.quotes.at(-1).order_type, 'somminar', 'Changing the type gets a fresh quote');
@@ -257,17 +323,26 @@ const server = http.createServer(async (req, res) => {
 		await page.screenshot({ path: path.join(evidence, 'somminar-mobile.png') });
 		await page.setViewportSize({ width: 1440, height: 1000 });
 		const quoteBeforeSave = copy(logs.quotes.at(-1)), quoteCountBeforeSave = logs.quotes.length;
-		await page.locator('#cc-save-draft').click(); await waitCount(logs.updates, 4); await idleSave();
+		await page.locator('#cc-save-draft').click(); await waitCount(logs.updates, 5); await idleSave();
 		await page.waitForFunction(() => !document.getElementById('cc-create-order').disabled);
 		assert(logs.quotes.length > quoteCountBeforeSave, 'Saving a linked-customer draft requotes after its reference rotates');
 		assert.notEqual(logs.quotes.at(-1).customer.reference, quoteBeforeSave.customer.reference);
 		assert.equal(logs.updates.at(-1).input.customer.reference, quoteBeforeSave.customer.reference, 'Save and subsequent fresh quote use their own session-bound references');
+		assert.equal(Number(logs.updates.at(-1).input.lines[0].price_override.value), 17.25);
+		await page.reload();
+		await waitForTotal('36.57');
+		await editPrice.click();
+		assert.equal(await adjustmentType.inputValue(), 'fixed');
+		assert.equal(await priceDialog.getByLabel('Unit price (USD)').inputValue(), '17.25');
+		await priceDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 		await page.screenshot({ path: path.join(evidence, 'draft-loaded-desktop.png'), fullPage: true });
 		await page.locator('#cc-create-order').evaluate((button) => { button.click(); button.click(); });
 		await waitCount(logs.prepares, 1);
 		await page.locator('#cc-payment-panel').waitFor();
 		assert.equal(logs.prepares[0].route, 'drafts/10/prepare');
 		assert.equal(logs.prepares[0].input.order_type, 'somminar', 'Prepare sends the selected order type');
+		assert.equal(logs.prepares[0].input.lines[0].price_override.type, 'fixed');
+		assert.equal(Number(logs.prepares[0].input.lines[0].price_override.value), 17.25);
 		await page.getByRole('heading', { name: 'SOMMinar™ Pickup', exact: true }).waitFor();
 		await page.screenshot({ path: path.join(evidence, 'somminar-prepared-desktop.png'), fullPage: true });
 		assert.equal(new URL(page.url()).searchParams.get('cc_order'), '700');
@@ -285,7 +360,7 @@ const server = http.createServer(async (req, res) => {
 		assert.equal(new URL(page.url()).searchParams.get('cc_order'), '700', 'Reopening a converted draft returns its existing order');
 		assert.equal(logs.prepares.length, 1, 'Reopening the draft cannot prepare a second order');
 		noCommerceWrites(); assert.deepEqual(errors, [], 'No browser runtime errors');
-		console.log('PASS: incomplete saved drafts, exact uncertain-save retry without duplicate draft, pending-save lock, separate shipping contacts, searchable reload, same-ID/versioned updates, duplicate-click guard, conflict recovery, unsaved-work confirmation, new draft isolation, pagination and last-page deletion clamp, delete confirmation, linked-customer reference refresh, current-price quotes, draft-specific prepare once, initial order-load lock, prepared-draft redirect, no payment/email/order creation during save/load, and mobile layout.');
+		console.log('PASS: incomplete saved drafts, exact uncertain-save retry without duplicate draft, pending-save lock, separate shipping contacts, searchable reload, same-ID/versioned updates, duplicate-click guard, conflict recovery, unsaved-work confirmation, new draft isolation, pagination and last-page deletion clamp, delete confirmation, linked-customer reference refresh, current-price quotes, per-item discounts and unit prices, duplicate product isolation and reset, focus restoration, draft-specific prepare once, initial order-load lock, prepared-draft redirect, no payment/email/order creation during save/load, and mobile layout.');
 		console.log(`Screenshots: ${evidence}`);
 	} catch (error) {
 		console.error('Browser errors:', errors);

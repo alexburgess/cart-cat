@@ -61,6 +61,8 @@ final class Admin {
 			'restUrl' => esc_url_raw( rest_url( 'cart-cat/v1/' ) ),
 			'nonce'   => wp_create_nonce( 'wp_rest' ),
 			'square'  => Square::public_config(),
+			'currency' => get_woocommerce_currency(),
+			'decimals' => wc_get_price_decimals(),
 			'hold' => Stock_Hold::config(),
 			'countries' => WC()->countries->get_countries(),
 			'states' => WC()->countries->get_states(),
